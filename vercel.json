@@ -1,0 +1,36 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "redirects": [
+    {
+      "source": "/at-glance",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/map",
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/timeline/:slug",
+      "destination": "/timeline#:slug",
+      "permanent": true
+    },
+    {
+      "source": "/rulers/:slug",
+      "destination": "/rulers#r-:slug",
+      "permanent": true
+    },
+    {
+      "source": "/houses/:slug",
+      "destination": "/houses",
+      "permanent": false
+    },
+    {
+      "source": "/prime-ministers",
+      "destination": "/rulers",
+      "permanent": false
+    }
+  ]
+}
