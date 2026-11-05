@@ -1,0 +1,23 @@
+User-agent: *
+Allow: /
+Disallow: /includes/
+Disallow: /contact-handler.php
+
+# AI search and assistant crawlers are welcome — see /llms.txt for a
+# curated overview and /llms-full.txt for the full corpus.
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: CCBot
+Allow: /
+Disallow: /includes/
+Disallow: /contact-handler.php
+
+Sitemap: https://english-history.com/sitemap.xml

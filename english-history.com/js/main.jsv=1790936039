@@ -1,0 +1,4371 @@
+/* ═══════════════════════════════════════════
+   GREAT BRITAIN — HISTORY TIMELINE
+   main.js  (361-era edition)
+═══════════════════════════════════════════ */
+'use strict';
+
+/* ── Constants ── */
+const WINDOW_HALF = 10;   // items visible above / below active in timeline
+
+/* ── Rulers ── */
+// Populated from data/british-rulers.json via the protected `rulers` endpoint;
+// `let` so existing helpers (getRuler, applyRuler, RULERS.indexOf, ...)
+// keep working unchanged once the data arrives.
+let RULERS = [];
+
+// Populated from data/world-events.json — flat, chronological list of major
+// world events used for the event modal's "Meanwhile in Europe and the
+// world" sidebar (see getWorldEventsForYear).
+let WORLD_EVENTS = [];
+
+// Populated from data/timeline-maps.json — chronological list of
+// { year, file } territory-map images used by the interactive Map modal
+// (see nearestMapFor / openMapModal).
+let TIMELINE_MAPS = [];
+
+const DYNASTIES = {
+  'prehistoric': { label: 'Prehistoric Britain', color: '#78866b', description: 'Britain before written rule: migrating communities, farming societies, monument builders and Iron Age tribal polities.' },
+  'roman-britain': { label: 'Roman Britain', color: '#9b4f3f', description: 'Britain under Roman imperial government, from the conquest of AD 43 to the withdrawal of imperial authority in the early fifth century.' },
+  'early-kingdoms': { label: 'Early Kingdoms', color: '#718096', description: 'The post-Roman age of Brittonic and Anglo-Saxon kingdoms before England emerged as a unified realm.' },
+  'wessex': { label: 'House of Wessex', color: '#c9a844', description: 'The West Saxon royal house that resisted Viking conquest and led the long process of English unification.' },
+  'denmark': { label: 'House of Denmark', color: '#557a78', description: 'The Danish kings who briefly joined England to a wider North Sea empire during the eleventh century.' },
+  'godwin': { label: 'House of Godwin', color: '#9a6b45', description: 'The powerful English family whose Harold II became the last crowned Anglo-Saxon king.' },
+  'norman': { label: 'Norman Dynasty', color: '#8f5f4a', description: 'William the Conqueror and his heirs transformed landholding, government, architecture and England’s relationship with continental Europe.' },
+  'blois': { label: 'House of Blois', color: '#7e6a9e', description: 'Stephen’s disputed reign brought civil war with Empress Matilda in the conflict known as the Anarchy.' },
+  'plantagenet': { label: 'Plantagenets', color: '#b8860b', description: 'A long royal line marked by legal change, baronial conflict, war with France and the growth of Parliament.' },
+  'lancaster': { label: 'House of Lancaster', color: '#a33a3a', description: 'A Plantagenet branch whose kings ruled through the Hundred Years’ War and the opening of the Wars of the Roses.' },
+  'york': { label: 'House of York', color: '#e5e5df', description: 'The rival Plantagenet branch that contested the crown during the Wars of the Roses.' },
+  'tudor': { label: 'House of Tudor', color: '#9b2f3f', description: 'The dynasty of the Reformation, royal centralisation, overseas expansion and the Elizabethan cultural flowering.' },
+  'tudor-claimant': { label: 'Tudor Claimant', color: '#b76e79', description: 'Lady Jane Grey’s brief and disputed rule during the succession crisis of 1553.' },
+  'stuart': { label: 'House of Stuart', color: '#6f4f8f', description: 'The crowns of England and Scotland were united under one monarch, while civil war and revolution redefined royal authority.' },
+  'commonwealth': { label: 'Commonwealth', color: '#8a7650', description: 'England became a republic after the execution of Charles I, governed without a king or House of Lords.' },
+  'protectorate': { label: 'Protectorate', color: '#596b4f', description: 'Oliver and Richard Cromwell served as Lords Protector during Britain’s republican interregnum.' },
+  'orange': { label: 'House of Orange', color: '#d47b2c', description: 'William III ruled after the Glorious Revolution established a durable constitutional settlement.' },
+  'hanover': { label: 'House of Hanover', color: '#4f6f9f', description: 'Hanoverian monarchs presided over parliamentary government, industrialisation and the expansion of the British Empire.' },
+  'saxe-coburg-gotha': { label: 'Saxe-Coburg and Gotha', color: '#627d98', description: 'Edward VII’s royal house linked the British monarchy closely with Europe before the First World War.' },
+  'windsor': { label: 'House of Windsor', color: '#3d7a9a', description: 'Renamed during the First World War, the modern royal house has adapted to democracy, decolonisation and mass media.' },
+};
+
+const FILTER_LABELS = { all: 'All', battle: 'Battles', 'ruler-change': 'Rulers', 'main-event': 'Events' };
+// Lowercase versions of FILTER_LABELS for the filter-banner disclaimer
+// text, as opposed to the capitalized pill label used elsewhere.
+const FILTER_READABLE = { battle: 'battles', 'ruler-change': 'ruler changes', 'main-event': 'main events' };
+
+// Small per-category glyphs shown next to the year on each timeline item —
+// same artwork as the FILTER BY dropdown icons, so a visitor learns to
+// associate one with the other.
+const CATEGORY_ICONS = {
+  battle: `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+    <path d="M2 14L11 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+    <path d="M11 5L14.5 1.7c1 1.1 1.1 2.7-.2 3.9L11 8.3Z" fill="currentColor"/>
+    <path d="M14 14L5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+    <path d="M5 5L1.5 1.7c-1 1.1-1.1 2.7.2 3.9L5 8.3Z" fill="currentColor"/>
+  </svg>`,
+  'ruler-change': `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M4 12h8M5 12V9l3-3 3 3v3M8 6V3m-2 1l2-2 2 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`,
+  'main-event': `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M8 1l1.6 4.2H14l-3.6 2.6 1.4 4.2L8 9.7l-3.8 2.3 1.4-4.2L2 5.2h4.4z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`,
+};
+// Fixed display order so an era with multiple categories always shows its
+// icons in the same sequence (battle, then ruler change, then main event).
+const CATEGORY_ICON_ORDER = ['battle', 'ruler-change', 'main-event'];
+
+/* ── State ── */
+const state = {
+  eras:            [],
+  order:           'asc',
+  filter:          'all',
+  search:          '',
+  activeEra:       0,
+  activeEvent:     0,
+  bgActive:        'a',
+  wheelAccum:      0,
+  activeRulerIdx:   -1,
+  uniqueEraLabels:  [],
+  modalEvent:       null,
+  modalRuler:       null,
+  // Set when an event is opened from within a ruler profile modal's "Events
+  // During Reign" list — closing the event modal then reopens this ruler's
+  // profile instead of closing all the way back to the timeline.
+  modalReturnRuler: null,
+  // The mirror image of modalReturnRuler — set when a ruler profile is
+  // opened from within an event modal (the "Who Was in Power" card, or a
+  // Predecessor/Successor link), so closing the ruler modal reopens that
+  // event instead of closing all the way back to the timeline.
+  modalReturnEvent: null,
+  // Prime minister shown in the profile modal (openPmProfileModal), and the
+  // one to return to when an event opened from its "Events in Office" list
+  // closes — the prime-minister counterparts of modalRuler/modalReturnRuler.
+  modalPm:          null,
+  modalReturnPm:    null,
+  // Set when an event modal is opened from a Key Events entry on the At a
+  // Glance page — that page never actually closes underneath (the event
+  // modal just layers on top, same as a ruler profile opening on top of
+  // the Rulers & Dynasties page), so closing just needs to resync the URL
+  // and nav-link back to /at-glance instead of falling through to
+  // /timeline.
+  modalReturnAtGlance: false,
+  mapYear:          null,
+};
+
+/* ── DOM ── */
+const dom = {
+  bgA:            document.getElementById('bg-a'),
+  bgB:            document.getElementById('bg-b'),
+  tlItems:        document.getElementById('timeline-items'),
+  scrollDriver:   document.getElementById('scroll-driver'),
+  progressBar:    document.getElementById('scroll-progress-bar'),
+  mapLayerA:      document.getElementById('map-layer-a'),
+  mapLayerB:      document.getElementById('map-layer-b'),
+  pagDisplay:     document.getElementById('pagination-display'),
+  eventNav:       document.getElementById('event-nav'),
+  eventBlock:     document.getElementById('event-block'),
+  contentHeading: document.getElementById('content-heading'),
+  eventSubtitle:  document.getElementById('event-subtitle'),
+  eventText:      document.getElementById('event-text'),
+  readMoreBtn:    document.getElementById('read-more-btn'),
+  eventCardMedia: document.getElementById('event-card-media'),
+  eventCardImg:   document.getElementById('event-card-img'),
+  filterBanner:     document.getElementById('filter-banner'),
+  filterBannerText: document.getElementById('filter-banner-text'),
+  filterBannerClear: document.getElementById('filter-banner-clear'),
+  successionBlock: document.getElementById('succession-block'),
+  successionList:  document.getElementById('succession-list'),
+  contentPanel:  document.getElementById('content-panel'),
+  orderAsc:      document.getElementById('order-asc'),
+  orderDesc:     document.getElementById('order-desc'),
+  prevEvent:     document.getElementById('prev-event'),
+  nextEvent:     document.getElementById('next-event'),
+  orderToggle:   document.getElementById('order-toggle'),
+  orderLabel:    document.getElementById('order-label'),
+  rulerCard:     document.getElementById('ruler-card'),
+  rulerImg:      document.getElementById('ruler-img'),
+  rulerPortraitPh: document.getElementById('ruler-portrait-ph'),
+  rulerName:     document.getElementById('ruler-name'),
+  rulerTitleEl:  document.getElementById('ruler-title-el'),
+  rulerReign:    document.getElementById('ruler-reign'),
+  rulerCrownIcon: document.getElementById('ruler-crown-icon'),
+  rulerPrevious: document.getElementById('ruler-previous'),
+  rulerNext:     document.getElementById('ruler-next'),
+  rulerViewDynasty: document.getElementById('ruler-view-dynasty'),
+  eraNav:        document.getElementById('era-nav'),
+  eraNavInner:   document.getElementById('era-nav-inner'),
+  eraIndicator:      document.getElementById('era-indicator'),
+  eraIndicatorLabel: document.getElementById('era-indicator-label-text'),
+  modal:         document.getElementById('modal'),
+  modalPanel:    document.querySelector('.modal-panel'),
+  modalContent:  document.querySelector('.modal-panel .modal-content'),
+  modalBackdrop: document.getElementById('modal-backdrop'),
+  modalClose:    document.getElementById('modal-close'),
+  modalShareWrap: document.querySelector('#modal .share-wrap'),
+  modalShareBtn:  document.getElementById('modal-share-btn'),
+  modalShareMenu: document.getElementById('modal-share-menu'),
+  modalPrevious: document.getElementById('modal-previous'),
+  modalNext:     document.getElementById('modal-next'),
+  modalYearTag:  document.getElementById('modal-year-tag'),
+  modalTitle:    document.getElementById('modal-title'),
+  modalBody:     document.getElementById('modal-body'),
+  imageLightbox: document.getElementById('image-lightbox'),
+  lightboxClose: document.getElementById('image-lightbox-close'),
+  lightboxBackdrop: document.getElementById('image-lightbox-backdrop'),
+  lightboxFigure: document.querySelector('.image-lightbox-figure'),
+  lightboxImg:   document.getElementById('image-lightbox-img'),
+  lightboxCaption: document.getElementById('image-lightbox-caption'),
+  familyTreeLightbox: document.getElementById('family-tree-lightbox'),
+  familyTreeLightboxPanel: document.querySelector('.family-tree-lightbox-panel'),
+  familyTreeLightboxClose: document.getElementById('family-tree-lightbox-close'),
+  familyTreeLightboxBackdrop: document.getElementById('family-tree-lightbox-backdrop'),
+  familyTreeLightboxBody: document.getElementById('family-tree-lightbox-body'),
+  mapViewer:      document.getElementById('map-viewer'),
+  mapViewerTitle: document.getElementById('map-viewer-title'),
+  mapViewerFrame: document.getElementById('map-viewer-frame'),
+  mapViewerClose: document.getElementById('map-viewer-close'),
+  mapViewerBackdrop: document.getElementById('map-viewer-backdrop'),
+  imageCredit:   document.getElementById('image-credit'),
+  creditSource:  document.getElementById('image-credit-source'),
+  creditCreator: document.getElementById('image-credit-creator'),
+  creditProvider: document.getElementById('image-credit-provider'),
+  creditLicense: document.getElementById('image-credit-license'),
+  contactModal:        document.getElementById('contact-modal'),
+  contactModalPanel:   document.querySelector('#contact-modal .modal-panel'),
+  contactModalClose:   document.getElementById('contact-modal-close'),
+  contactModalBackdrop: document.getElementById('contact-modal-backdrop'),
+  contactForm:         document.getElementById('contact-form'),
+  contactPage:         document.getElementById('contact-page'),
+  mistakeLink:         document.getElementById('mistake-link'),
+  filterWrap:  document.getElementById('filter-wrap'),
+  filterBtn:   document.getElementById('filter-btn'),
+  filterMenu:  document.getElementById('filter-menu'),
+  filterLabel: document.getElementById('filter-label'),
+  langWrap:    document.getElementById('lang-wrap'),
+  langToggle:  document.getElementById('lang-toggle'),
+  langMenu:    document.getElementById('lang-menu'),
+  searchWrap:  document.getElementById('search-wrap'),
+  searchInput: document.getElementById('search-input'),
+  searchClear: document.getElementById('search-clear'),
+  introBlock:  document.getElementById('intro-block'),
+  appLogoBtn:  document.getElementById('app-logo-btn'),
+  navBurger:   document.getElementById('nav-burger'),
+  navLinksList: document.getElementById('main-nav-links'),
+  familyPage:      document.getElementById('family-page'),
+  rulersPage:      document.getElementById('rulers-page'),
+  rpPanel:         document.querySelector('#rulers-page .rp-panel'),
+  rpClose:         document.getElementById('rp-close'),
+  rpShareWrap:     document.querySelector('#rulers-page .share-wrap'),
+  rpShareBtn:      document.getElementById('rp-share-btn'),
+  rpShareMenu:     document.getElementById('rp-share-menu'),
+  rpMistakeBtn:    document.getElementById('rp-mistake-btn'),
+  atGlancePage:    document.getElementById('at-glance-page'),
+  agPanel:         document.querySelector('#at-glance-page .ag-panel'),
+  agClose:         document.getElementById('ag-close'),
+  agShareWrap:     document.querySelector('#at-glance-page .share-wrap'),
+  agShareBtn:      document.getElementById('ag-share-btn'),
+  agShareMenu:     document.getElementById('ag-share-menu'),
+  agEraList:       document.getElementById('ag-era-list'),
+  mapPage:         document.getElementById('map-page'),
+  cmPanel:         document.querySelector('#map-page .cm-panel'),
+  cmControls:      document.querySelector('#map-page .cm-controls'),
+  cmClose:         document.getElementById('cm-close'),
+  cmShareWrap:     document.querySelector('#map-page .share-wrap'),
+  cmShareBtn:      document.getElementById('cm-share-btn'),
+  cmShareMenu:     document.getElementById('cm-share-menu'),
+  rpSearchInput:   document.getElementById('rp-search-input'),
+  rpSearchClear:   document.getElementById('rp-search-clear'),
+  rpTabs:          document.getElementById('rp-tabs'),
+  rpLegend:        document.getElementById('rp-legend'),
+  rpTimeline:      document.getElementById('rp-timeline-body'),
+  rpAxis:          document.getElementById('rp-axis'),
+  rpAxisTicks:     document.getElementById('rp-axis-ticks'),
+  rpAxisBar:       document.getElementById('rp-axis-bar'),
+  rpAvatars:       document.getElementById('rp-avatars'),
+  rpDynastyLabels: document.getElementById('rp-dynasty-labels'),
+  rpDynastyInfo:   document.getElementById('rp-dynasty-info'),
+  rpRulerTicks:    document.getElementById('rp-ruler-ticks'),
+  rpHoverYearStart: document.getElementById('rp-hover-year-start'),
+  rpHoverYearEnd:  document.getElementById('rp-hover-year-end'),
+  rpPagePrev:      document.getElementById('rp-page-prev'),
+  rpTooltip:       document.getElementById('rp-tooltip'),
+};
+
+/* ─────────────────────────────────────────
+   MERGE same-year eras so each year appears
+   only once in the scroll; sub-events are
+   navigated via the pagination arrows.
+───────────────────────────────────────── */
+function mergeByYear(eras) {
+  const map = new Map();
+  for (const era of eras) {
+    const events = era.events.map(event => ({
+      ...event,
+      categories: event.categories || (event.category ? [event.category] : era.categories || (era.category ? [era.category] : [])),
+      tragic: event.tragic ?? era.tragic ?? false,
+      sources: event.sources || era.sources || [],
+      image: event.image || era.image,
+      imageAttribution: event.imageAttribution || era.imageAttribution,
+      location: event.location || era.location || '',
+      type: event.type || era.type || '',
+    }));
+    if (map.has(era.year)) {
+      map.get(era.year).events.push(...events);
+    } else {
+      map.set(era.year, { ...era, events });
+    }
+  }
+  return [...map.values()];   // already chronological; Map preserves insertion order
+}
+
+// Data now flows through data.php (session-token gated — see .htaccess and
+// data/.htaccess, which block direct requests to data/*.json) instead of
+// being fetched as static files. Still exactly one request per file per
+// page load; every modal/nav interaction after that stays in-memory.
+const DATA_TOKEN = (document.querySelector('meta[name="data-token"]') || {}).content || '';
+function fetchData(file) {
+  return fetch(`data.php?file=${file}`, { headers: { 'X-Data-Token': DATA_TOKEN } })
+    .then(r => { if (!r.ok) throw new Error(`Cannot load ${file}`); return r.json(); });
+}
+
+Promise.all([
+  fetchData('events'),
+  fetchData('rulers'),
+  fetchData('world-events'),
+  fetchData('timeline-maps'),
+])
+  .then(([eventsData, rulersData, worldEventsData, timelineMapsData]) => {
+    state.eras = [
+      { id: '__intro__', isIntro: true, year: null, label: 'WELCOME', eraName: 'Welcome',
+        events: [], image: 'img/british-history-intro.webp', gradient: '#000', mapScale: 0, imageAttribution: null },
+      ...mergeByYear(eventsData.eras),
+    ];
+    RULERS = rulersData;
+    WORLD_EVENTS = worldEventsData;
+    TIMELINE_MAPS = timelineMapsData.slice().sort((a, b) => a.year - b.year);
+    init();
+  })
+  .catch(err => {
+    document.body.innerHTML = `<div style="color:#c9a844;padding:48px;font-family:Georgia;font-size:18px;">
+      Failed to load timeline data.<br><small style="color:#666">${err.message}</small>
+    </div>`;
+  });
+
+function init() {
+  // Disable the scroll-driver height; we use wheel events for navigation
+  if (dom.scrollDriver) dom.scrollDriver.style.height = '0';
+
+  buildTimelineWindow(0);
+  buildEraNav();
+  addScrollHint();
+  bindEvents();
+  activateEra(0, false);
+  updateOrderArrows();
+  buildSlugMaps();
+  // One-time shim for the old #timeline/#rulers/#map/#legacy/#bibliography/
+  // #about hash links (pre-migration to real paths) — the server never sees
+  // the hash, so this only ever needs handling client-side, once, on boot.
+  if ((currentRoutePath() === '/' || currentRoutePath() === '') && PATH_TO_NAV_KEY[window.location.hash.replace(/^#/, '')]) {
+    history.replaceState(null, '', BASE_PATH + '/' + window.location.hash.replace(/^#/, ''));
+  }
+  routeFromPath();
+  // Direct event URLs ship a server-rendered modal before the client-side
+  // router runs; initialise its progressive source list as well.
+  initModalSourceSlider(dom.modalBody);
+
+  // updateEraNav() centers the active chip using its measured offsetLeft/
+  // offsetWidth — if the webfont (Source Sans 3) hasn't finished loading
+  // yet, those measurements are based on the fallback font's metrics, and
+  // the resulting translateX can be off far enough to scroll every chip
+  // out of the nav's masked viewport once the real font swaps in and
+  // reflows the text. Re-run once fonts are actually ready to fix that.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => updateEraNav());
+  }
+}
+
+/* ─────────────────────────────────────────
+   ERA CATEGORISATION
+───────────────────────────────────────── */
+function inferEventCategories(name) {
+  const categories = [];
+  if (/\b(battle|war|siege|raid|campaign|crusade|invasion|occupation|conflict|massacre|uprising|revolt|mutiny|skirmish)\b/i.test(name)) categories.push('battle');
+  if (/\b(death|dies|assassinat|elect|coronat|inherit|seize|succession|abdicate|throne|regent|president|impeach|coup)\b|begins.*(rule|reign)/i.test(name)) categories.push('ruler-change');
+  return categories;
+}
+
+function getEventCategories(event, era = {}) {
+  const explicit = event.categories || (event.category ? [event.category] : []);
+  if (explicit.length) return explicit;
+  return inferEventCategories(event.title || era.eraName || '');
+}
+
+function getEraCategories(era) {
+  const categories = new Set(era.categories || (era.category ? [era.category] : []));
+  (era.events || []).forEach(event => getEventCategories(event, era).forEach(category => categories.add(category)));
+  return [...categories];
+}
+
+function narrowEraForCategory(era, category) {
+  const matchingEvents = (era.events || []).filter(event => getEventCategories(event, era).includes(category));
+  if (!matchingEvents.length || matchingEvents.length === era.events.length) return era;
+  return { ...era, events: matchingEvents, eraName: matchingEvents[0].title };
+}
+
+/* ─────────────────────────────────────────
+   ORDERED ERA LIST
+───────────────────────────────────────── */
+// Strips diacritics (NFD-decomposes, then drops the combining marks) so
+// searches match names with or without diacritics.
+function normalizeSearchText(value) {
+  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+function eventMatchesSearch(ev, lq) {
+  return (ev.title && normalizeSearchText(ev.title).includes(lq))
+    || (ev.subtitle && normalizeSearchText(ev.subtitle).includes(lq))
+    || (ev.text && normalizeSearchText(ev.text).includes(lq));
+}
+
+function matchesSearch(era, q) {
+  const lq = normalizeSearchText(q);
+  if (String(era.year).includes(lq)) return true;
+  if (era.eraName && normalizeSearchText(era.eraName).includes(lq)) return true;
+  if (era.label && normalizeSearchText(era.label).includes(lq)) return true;
+  return (era.events || []).some(ev => eventMatchesSearch(ev, lq));
+}
+
+// Same-year eras are merged into one timeline entry (see mergeByYear) — a
+// query that matches only one of several sub-events would otherwise still
+// surface every event for that year in the results. Narrow `events` down to
+// just the matches. A bare year query (e.g. "1340") still shows the whole
+// year, and a query that only matches era-level metadata (the dynasty
+// label) with no per-event match falls back to showing every event, since
+// there's nothing more specific to narrow to.
+function narrowEraForSearch(era, q) {
+  const lq = normalizeSearchText(q);
+  if (String(era.year).includes(lq)) return era;
+
+  const matchingEvents = (era.events || []).filter(ev => eventMatchesSearch(ev, lq));
+  if (!matchingEvents.length || matchingEvents.length === era.events.length) return era;
+  return { ...era, events: matchingEvents, eraName: matchingEvents[0].title };
+}
+
+function getOrderedEras() {
+  const intro = state.eras.find(e => e.isIntro);
+  let eras = (state.order === 'asc' ? [...state.eras] : [...state.eras].reverse())
+    .filter(e => !e.isIntro);
+  if (state.filter !== 'all') {
+    eras = eras.filter(era => getEraCategories(era).includes(state.filter))
+      .map(era => narrowEraForCategory(era, state.filter));
+  }
+  if (state.search) {
+    eras = eras.filter(era => matchesSearch(era, state.search))
+      .map(era => narrowEraForSearch(era, state.search));
+  }
+  if (intro && state.filter === 'all' && !state.search) eras.unshift(intro);
+  return eras;
+}
+
+/* ─────────────────────────────────────────
+   WINDOWED TIMELINE DOM
+   Only renders ±WINDOW_HALF items around active
+───────────────────────────────────────── */
+function buildTimelineWindow(activeIndex, previousIndex = activeIndex) {
+  const ordered = getOrderedEras();
+  const total   = ordered.length;
+  const start   = Math.max(0, activeIndex - WINDOW_HALF);
+  const end     = Math.min(total - 1, activeIndex + WINDOW_HALF);
+
+  const classFor = (g, refIndex) => {
+    const dist = Math.abs(g - refIndex);
+    return dist === 0 ? 'active' : dist <= 2 ? 'near' : 'far';
+  };
+
+  // Items are rebuilt from scratch every step, so a freshly created element
+  // has no "before" state to transition from — its active/near/far class is
+  // just baked in at creation, and the year number snaps straight to its
+  // final size/color instead of animating. To fix that, paint the *previous*
+  // active position first (when it's still in view), then flip every item to
+  // its real class on the next frame so the CSS transitions on .tl-year/
+  // .tl-dot have something to interpolate from.
+  const canAnimate = previousIndex !== activeIndex && previousIndex >= start && previousIndex <= end;
+  const initialRef = canAnimate ? previousIndex : activeIndex;
+
+  dom.tlItems.innerHTML = '';
+
+  for (let g = start; g <= end; g++) {
+    const era  = ordered[g];
+
+    const el = document.createElement('div');
+    el.className  = 'tl-item ' + classFor(g, initialRef);
+    el.dataset.globalIndex = g;
+    el.setAttribute('role', 'listitem');
+    if (era.isIntro) {
+      el.classList.add('is-intro');
+      el.innerHTML = `
+        <div class="tl-dot" aria-hidden="true"></div>
+        <div class="tl-label">
+          <span class="tl-era">${era.eraName}</span>
+        </div>`;
+    } else {
+      const badge = era.events.length > 1
+        ? `<span class="tl-event-count">${era.events.length}</span>`
+        : '';
+      const categoryIcons = CATEGORY_ICON_ORDER
+        .filter(cat => getEraCategories(era).includes(cat))
+        .map(cat => `<span class="tl-cat-icon tl-cat-icon--${cat}">${CATEGORY_ICONS[cat]}</span>`)
+        .join('');
+      el.innerHTML = `
+        <div class="tl-dot" aria-hidden="true"></div>
+        <div class="tl-label">
+          <span class="tl-year-row">
+            <span class="tl-year-wrap"><span class="tl-year">${era.year}</span></span>
+            <span class="tl-year-badges">${badge}${categoryIcons}</span>
+          </span>
+          <span class="tl-era">${era.eraName}</span>
+        </div>`;
+    }
+    el.addEventListener('click', () => goToEra(g));
+    dom.tlItems.appendChild(el);
+  }
+
+  positionTimeline(activeIndex, start);
+  updateEraIndicator(activeIndex, ordered);
+
+  if (canAnimate) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      dom.tlItems.querySelectorAll('.tl-item[data-global-index]').forEach(el => {
+        el.classList.remove('active', 'near', 'far');
+        el.classList.add(classFor(Number(el.dataset.globalIndex), activeIndex));
+      });
+    }));
+  }
+}
+
+/* ─────────────────────────────────────────
+   POSITION TIMELINE (translate to center active)
+───────────────────────────────────────── */
+function positionTimeline(activeIndex, windowStart) {
+  const track = document.getElementById('timeline-track');
+
+  // The timeline is a vertical column at every breakpoint (see the matching
+  // @media (max-width:760px) block in style.css, which just scales the item
+  // heights down for the narrower mobile column). Below the mobile
+  // breakpoint, item heights shrink from 78/110 to 58/82 — keep these in
+  // sync with --tl-item-h and .tl-item.active's height there.
+  const isMobile = window.matchMedia('(max-width:760px)').matches;
+  const defH = isMobile ? 58 : 78;
+  const actH = isMobile ? 82 : 110;
+
+  // Represent items above the rendered window so the container has a global
+  // coordinate system — translateY then changes by defH on every step,
+  // giving a consistent slide animation regardless of window position.
+  dom.tlItems.style.paddingLeft = '0';
+  dom.tlItems.style.paddingTop  = `${windowStart * defH}px`;
+
+  if (isMobile) {
+    // On mobile the active item's number sits near the top of its row (see
+    // .tl-item.active .tl-label in style.css), so anchor that top edge near
+    // the track's own top instead of vertically centering it — this lines
+    // the active year up with the event title in the content column beside
+    // it, rather than the middle of the screen.
+    const MOBILE_ANCHOR = 109;
+    const offsetY = activeIndex * defH;
+    dom.tlItems.style.transform = `translateY(${MOBILE_ANCHOR - offsetY}px)`;
+    return;
+  }
+
+  const offsetY = activeIndex * defH + actH / 2;
+  const trackH  = track ? track.offsetHeight : window.innerHeight - 120;
+  dom.tlItems.style.transform = `translateY(${(trackH / 2) - offsetY}px)`;
+}
+
+/* ─────────────────────────────────────────
+   ERA INDICATOR (static gold marker naming the active era)
+   Deliberately does no position math — the element fills a fixed box (see
+   .era-indicator in style.css) so it never moves as you scroll; only the
+   label text and visibility change here. Skipped on mobile, where the
+   ruler-card gap this marker lives in doesn't exist (see the
+   max-width:760px CSS override).
+───────────────────────────────────────── */
+let eraIndicatorSwapTimer = null;
+function updateEraIndicator(activeIndex, ordered) {
+  const el = dom.eraIndicator;
+  if (!el) return;
+
+  const era = ordered[activeIndex];
+  const isMobile = window.matchMedia('(max-width:760px)').matches;
+  if (isMobile || !era || era.isIntro || !era.label || state.filter !== 'all' || state.search) {
+    el.classList.remove('is-visible');
+    return;
+  }
+
+  const labelEl = dom.eraIndicatorLabel;
+  if (labelEl && labelEl.textContent !== era.label) {
+    // Fades the old label out, swaps the text once it's invisible, then
+    // lets the same CSS transition fade/scale the new text back in —
+    // clearTimeout guards against a fast run of era changes (rapid wheel
+    // scroll) leaving a stale swap to land after a later one.
+    labelEl.classList.add('is-swapping');
+    clearTimeout(eraIndicatorSwapTimer);
+    eraIndicatorSwapTimer = setTimeout(() => {
+      labelEl.textContent = era.label;
+      labelEl.classList.remove('is-swapping');
+    }, 160);
+  }
+  el.classList.add('is-visible');
+}
+
+/* ─────────────────────────────────────────
+   ACTIVATE ERA
+───────────────────────────────────────── */
+function activateEra(index, animate) {
+  const previousIndex = state.activeEra;
+  state.activeEra   = index;
+  state.activeEvent = 0;
+
+  const ordered = getOrderedEras();
+  const era = ordered[index];
+  if (!era) return;
+
+  if (index >= 3 && dom.scrollHint && !dom.scrollHint.classList.contains('hidden')) {
+    dom.scrollHint.classList.add('hidden');
+  }
+
+  // On mobile, #content-panel scrolls independently of the page — without
+  // this, switching eras while scrolled down into a long event (or the
+  // succession block below it) left the new card's top cut off behind the
+  // fixed search/era-nav bars instead of starting fresh at the top.
+  if (dom.contentPanel) dom.contentPanel.scrollTop = 0;
+
+  buildTimelineWindow(index, previousIndex);
+
+  if (era.isIntro) {
+    document.body.classList.add('intro-mode');
+    dom.eventBlock.hidden = true;
+    if (dom.introBlock) dom.introBlock.hidden = false;
+    dom.eventNav.style.visibility = 'hidden';
+    dom.rulerCard.classList.add('ruler-fade');
+    state.activeRulerIdx = -1;
+    if (animate && dom.introBlock) {
+      dom.introBlock.classList.add('content-fade-out');
+      setTimeout(() => dom.introBlock.classList.remove('content-fade-out'), 310);
+    }
+    updateEventVisual(era, 0, animate);
+    updateArrows(index, ordered.length);
+    updateMap(era);
+    updateProgress(index, ordered.length);
+    updateEraNav();
+    renderSuccession(era);
+    return;
+  }
+
+  document.body.classList.remove('intro-mode');
+
+  if (dom.introBlock) {
+    if (!dom.introBlock.hidden) dom.eventBlock.classList.add('content-fade-out');
+    dom.introBlock.hidden = true;
+  }
+  dom.eventBlock.hidden = false;
+
+  updateEventVisual(era, 0, animate);
+  updateContent(era, 0, animate);
+  updateArrows(index, ordered.length);
+  updateMap(era);
+  updateProgress(index, ordered.length);
+  updateRulerCard(era, animate);
+  updateEraNav();
+  renderSuccession(era);
+}
+
+/* ─────────────────────────────────────────
+   GO TO ERA (instant or smooth)
+───────────────────────────────────────── */
+function goToEra(index) {
+  const total = getOrderedEras().length;
+  const clamped = Math.max(0, Math.min(total - 1, index));
+  activateEra(clamped, true);
+}
+
+/* ─────────────────────────────────────────
+   BACKGROUND CROSSFADE
+───────────────────────────────────────── */
+function updateBackground(era, animate) {
+  const layerIn  = state.bgActive === 'a' ? dom.bgA : dom.bgB;
+  const layerOut = state.bgActive === 'a' ? dom.bgB : dom.bgA;
+
+  applyBgStyle(layerIn, era);
+
+  if (animate) {
+    layerIn.classList.remove('active', 'fadeout');
+    layerIn.classList.add('active');
+    layerOut.classList.remove('active');
+    layerOut.classList.add('fadeout');
+  } else {
+    layerIn.classList.add('active');
+    layerOut.classList.remove('active', 'fadeout');
+  }
+
+  state.bgActive = state.bgActive === 'a' ? 'b' : 'a';
+}
+
+function updateEventVisual(era, eventIndex, animate) {
+  const event = era.events[eventIndex] || {};
+  updateBackground({ ...era, image: event.image || era.image }, animate);
+  updateImageCredit(event.imageAttribution || era.imageAttribution);
+}
+
+function updateImageCredit(credit) {
+  if (!dom.imageCredit || !credit) {
+    if (dom.imageCredit) dom.imageCredit.hidden = true;
+    return;
+  }
+  dom.creditSource.textContent = credit.title || 'View source';
+  dom.creditSource.href = credit.sourceUrl || '#';
+  dom.creditCreator.textContent = credit.creator ? ` — ${credit.creator}` : '';
+  dom.creditProvider.textContent = credit.provider ? ` · ${credit.provider}` : '';
+  dom.creditLicense.textContent = credit.license || '';
+  dom.creditLicense.href = credit.licenseUrl || credit.sourceUrl || '#';
+  dom.creditLicense.hidden = !credit.license;
+  dom.imageCredit.title = credit.usageNote || '';
+  dom.imageCredit.hidden = false;
+}
+
+function applyBgStyle(layer, era) {
+  if (era.image) {
+    layer.style.backgroundImage    = `url('${era.image}')`;
+    layer.style.backgroundSize     = 'cover';
+    layer.style.backgroundPosition = 'center top';
+    layer.style.backgroundColor    = '#050308';
+  } else {
+    layer.style.backgroundImage = 'none';
+    layer.style.background      = era.gradient;
+  }
+}
+
+/* ─────────────────────────────────────────
+   CONTENT PANEL
+───────────────────────────────────────── */
+function updateContent(era, eventIndex, animate) {
+  const event = era.events[eventIndex];
+  if (!event) return;
+
+  const apply = () => {
+    updateFilterBanner();
+    // Same inline superscript category badge as the event modal's title
+    // (.em-event-cats / CATEGORY_ICON_ORDER / CATEGORY_ICONS) — innerHTML
+    // instead of textContent so the badge markup can ride along after the
+    // (escaped) title text.
+    const eventCategories = CATEGORY_ICON_ORDER.filter(cat => getEventCategories(event, era).includes(cat));
+    const categoryIconsHtml = eventCategories.length ? `
+      <span class="em-event-cats" aria-hidden="true">
+        ${eventCategories.map(cat => `<span class="em-event-cat-icon em-event-cat-icon--${cat}">${CATEGORY_ICONS[cat]}</span>`).join('')}
+      </span>` : '';
+    dom.contentHeading.innerHTML = `${escapeHtml(event.title)}${categoryIconsHtml}`;
+    dom.eventSubtitle.textContent  = (event.subtitle || '').replace(/^.*? — /, '');
+    // The timeline is a compact preview. Full multi-paragraph copy remains
+    // available in the event modal.
+    dom.eventText.textContent      = String(event.text || '').split(/\n\s*\n/)[0].trim();
+    document.body.classList.toggle('tragic', !!event.tragic);
+
+    const thumb = event.image || era.image;
+    if (dom.eventCardMedia && dom.eventCardImg) {
+      dom.eventCardMedia.classList.toggle('is-empty', !thumb);
+      if (thumb) {
+        dom.eventCardImg.src = thumb;
+        dom.eventCardImg.alt = event.title || '';
+      }
+    }
+
+    const total = era.events.length;
+    dom.pagDisplay.textContent        = `${eventIndex + 1} OF ${total}`;
+    dom.eventNav.style.visibility     = total > 1 ? 'visible' : 'hidden';
+    dom.prevEvent.disabled            = eventIndex === 0;
+    dom.nextEvent.disabled            = eventIndex === total - 1;
+  };
+
+  if (animate) {
+    dom.eventBlock.classList.add('content-fade-out');
+    setTimeout(() => {
+      apply();
+      dom.eventBlock.classList.remove('content-fade-out');
+    }, 310);
+  } else {
+    apply();
+  }
+}
+
+function updateArrows() { /* direction arrows don't disable; order-active class handles state */ }
+
+// Corner map (bottom-right, fixed size/position) — crossfades to the latest
+// TIMELINE_MAPS entry whose year has been reached by the active era's year
+// (never a future-dated map), same lookup and crossfade technique as the
+// Map modal's stage (see nearestMapEntry / setMapYear). The intro era has
+// no year, so it's left untouched — the whole container is already hidden
+// via body.intro-mode.
+let cornerMapActive = 'a';
+let cornerMapFile = null;
+
+function updateMap(era) {
+  if (era.year == null) return;
+  const entry = nearestMapEntry(era.year);
+  if (!entry || entry.file === cornerMapFile) return;
+  cornerMapFile = entry.file;
+
+  const layerIn  = cornerMapActive === 'a' ? dom.mapLayerA : dom.mapLayerB;
+  const layerOut = cornerMapActive === 'a' ? dom.mapLayerB : dom.mapLayerA;
+  if (!layerIn) return;
+
+  layerIn.style.backgroundImage = `url('${entry.file}')`;
+  layerIn.classList.remove('fadeout');
+  layerIn.classList.add('active');
+  if (layerOut) { layerOut.classList.remove('active'); layerOut.classList.add('fadeout'); }
+  cornerMapActive = cornerMapActive === 'a' ? 'b' : 'a';
+}
+
+
+function updateProgress(index, total) {
+  const pct = total > 1 ? (index / (total - 1)) * 100 : 0;
+  dom.progressBar.style.width = `${pct}%`;
+}
+
+/* ─────────────────────────────────────────
+   EVENT PAGINATION (within era)
+───────────────────────────────────────── */
+function navigateEvent(dir) {
+  const era  = getOrderedEras()[state.activeEra];
+  if (!era) return;
+  const next = state.activeEvent + dir;
+  if (next < 0 || next >= era.events.length) return;
+  state.activeEvent = next;
+  updateContent(era, next, true);
+  updateEventVisual(era, next, true);
+}
+
+/* ─────────────────────────────────────────
+   ORDER TOGGLE
+───────────────────────────────────────── */
+function toggleOrder() {
+  setOrder(state.order === 'asc' ? 'desc' : 'asc');
+}
+
+function setOrder(newOrder) {
+  state.order = newOrder;
+  if (dom.orderLabel) dom.orderLabel.textContent = newOrder === 'asc' ? 'OLDEST FIRST' : 'NEWEST FIRST';
+  updateOrderArrows();
+  activateEra(0, true);   // ↓ → index 0 = oldest;  ↑ → index 0 = newest
+}
+
+function updateOrderArrows() {
+  dom.orderAsc.classList.toggle('order-active',  state.order === 'asc');
+  dom.orderDesc.classList.toggle('order-active', state.order === 'desc');
+}
+
+/* ─────────────────────────────────────────
+   FILTER
+───────────────────────────────────────── */
+function setFilter(newFilter) {
+  state.filter = newFilter;
+  updateFilterUI();
+  activateEra(0, true);
+}
+
+function setSearch(q) {
+  state.search = q.trim();
+  if (dom.searchWrap) dom.searchWrap.classList.toggle('has-query', !!state.search);
+  if (dom.searchClear) dom.searchClear.hidden = !state.search;
+  activateEra(0, true);
+}
+
+// Reads state.search/state.filter and shows a disclaimer above the event
+// title whenever the timeline is narrowed — otherwise it's easy to forget a
+// search or category filter is active and wonder why so few events appear.
+function updateFilterBanner() {
+  if (!dom.filterBanner) return;
+  const hasSearch = !!state.search;
+  const hasFilter = state.filter !== 'all';
+  if (!hasSearch && !hasFilter) { dom.filterBanner.hidden = true; return; }
+
+  const parts = [];
+  if (hasFilter) parts.push(`category "${FILTER_READABLE[state.filter] || state.filter}"`);
+  if (hasSearch) parts.push(`search phrase "${state.search}"`);
+  dom.filterBannerText.textContent = `Events filtered by ${parts.join(' and ')}.`;
+  dom.filterBanner.hidden = false;
+}
+
+// Shared by the banner's "Remove filter" link and any other spot that needs
+// to fully reset both narrowing mechanisms at once.
+function clearSearchAndFilter() {
+  state.search = '';
+  state.filter = 'all';
+  if (dom.searchInput) dom.searchInput.value = '';
+  if (dom.searchWrap) dom.searchWrap.classList.remove('has-query');
+  if (dom.searchClear) dom.searchClear.hidden = true;
+  updateFilterUI();
+  activateEra(0, true);
+}
+
+function updateFilterUI() {
+  if (dom.filterLabel) dom.filterLabel.textContent = FILTER_LABELS[state.filter] || 'All';
+  document.querySelectorAll('.filter-option').forEach(opt => {
+    const active = opt.dataset.filter === state.filter;
+    opt.classList.toggle('active', active);
+    opt.setAttribute('aria-selected', String(active));
+  });
+}
+
+/* ─────────────────────────────────────────
+   ERA NAVIGATION PANEL
+───────────────────────────────────────── */
+function buildEraNav() {
+  const seen = new Set();
+  state.uniqueEraLabels = [];
+  for (const era of state.eras) {
+    if (era.isIntro) continue;
+    if (!seen.has(era.label)) {
+      seen.add(era.label);
+      state.uniqueEraLabels.push(era.label);
+    }
+  }
+
+  dom.eraNavInner.innerHTML = '';
+  for (const label of state.uniqueEraLabels) {
+    const btn = document.createElement('button');
+    btn.className   = 'era-nav-item';
+    btn.textContent = label;
+    btn.dataset.eraLabel = label;
+    btn.addEventListener('click', () => {
+      const ordered = getOrderedEras();
+      const idx = ordered.findIndex(e => e.label === label);
+      if (idx !== -1) goToEra(idx);
+    });
+    dom.eraNavInner.appendChild(btn);
+  }
+}
+
+function updateEraNav() {
+  const ordered     = getOrderedEras();
+  const activeLabel = ordered[state.activeEra]?.label;
+  let activeBtn     = null;
+
+  dom.eraNavInner.querySelectorAll('.era-nav-item').forEach(btn => {
+    const isActive = btn.dataset.eraLabel === activeLabel;
+    btn.classList.toggle('active', isActive);
+    if (isActive) activeBtn = btn;
+  });
+
+  if (!activeBtn) return;
+  requestAnimationFrame(() => {
+    const navW   = dom.eraNav.offsetWidth;
+    const btnW   = activeBtn.offsetWidth;
+    // #era-nav is `position:fixed`, so its width shouldn't legitimately be
+    // 0 — but if this runs before the browser's first real layout pass
+    // (e.g. a very early document.fonts.ready resolution), offsetWidth can
+    // momentarily read 0, which would compute a huge bogus shift and throw
+    // every chip off-screen. Bail and retry next frame instead of trusting
+    // that measurement — this is what caused chips to render correctly
+    // once, then jump off-screen a moment later.
+    if (navW === 0 || btnW === 0) {
+      requestAnimationFrame(() => updateEraNav());
+      return;
+    }
+    const btnLeft = activeBtn.offsetLeft;
+    const shift  = navW / 2 - btnLeft - btnW / 2;
+    dom.eraNavInner.style.transform = `translateX(${shift}px)`;
+  });
+}
+
+/* ─────────────────────────────────────────
+   RULER CARD
+───────────────────────────────────────── */
+function getRuler(year) {
+  let result = RULERS[0];
+  for (const r of RULERS) {
+    if (year < r.from) break;
+    if (year <= (r.to ?? year)) result = r;
+  }
+  return result;
+}
+
+function applyRuler(ruler) {
+  dom.rulerName.textContent    = ruler.name;
+  dom.rulerTitleEl.textContent = ruler.title;
+  dom.rulerReign.textContent   = `${ruler.reignLabel || 'Reign'}: ${ruler.reign}`;
+  dom.rulerCrownIcon.hidden    = !ruler.isKing;
+  const useImperialPlaceholder = !ruler.image && ruler.reign.includes('Russian Empire');
+  dom.rulerPortraitPh.classList.toggle('is-imperial', useImperialPlaceholder);
+
+  if (ruler.image) {
+    dom.rulerImg.hidden  = true;
+    dom.rulerImg.onload  = () => { dom.rulerImg.hidden = false; };
+    dom.rulerImg.onerror = () => {};
+    dom.rulerImg.alt     = `Portrait of ${ruler.name}`;
+    dom.rulerImg.src     = ruler.image;
+    if (dom.rulerImg.complete) dom.rulerImg.hidden = false;
+    dom.rulerPortraitPh.style.display = 'none';
+  } else {
+    dom.rulerImg.hidden  = true;
+    dom.rulerImg.onload  = null;
+    dom.rulerImg.onerror = null;
+    dom.rulerPortraitPh.style.display = '';
+  }
+
+  renderAdjacentRulers(RULERS.indexOf(ruler));
+}
+
+// Populates the "Previous" / "Next" mini-lists flanking the active ruler
+// card — up to two neighbours on each side, nearest neighbour closest to
+// the active card so the whole block reads chronologically top to bottom.
+function renderAdjacentRulers(idx) {
+  const itemHtml = r => `
+    <div class="rs-adjacent-item">
+      <span class="rs-adjacent-dot"></span>
+      <div class="rs-adjacent-text">
+        <span class="rs-adjacent-name">${r.name}</span>
+        <span class="rs-adjacent-years">${r.reign}</span>
+      </div>
+    </div>`;
+
+  const previous = [RULERS[idx - 2], RULERS[idx - 1]].filter(Boolean);
+  dom.rulerPrevious.innerHTML = previous.map(itemHtml).join('');
+
+  const next = [RULERS[idx + 1], RULERS[idx + 2]].filter(Boolean);
+  dom.rulerNext.innerHTML = next.map(itemHtml).join('');
+}
+
+// Dynasty ids (DYNASTIES' keys, e.g. "jagiellonian") are internal and don't
+// always read naturally in a URL — the hash uses a slug of the dynasty's
+// display label instead (e.g. "jagiellonians"), resolved back to an id on
+// load by dynastyIdFromSlug.
+function dynastySlug(id) {
+  const d = DYNASTIES[id];
+  return d ? slugify(d.label) : slugify(id);
+}
+function dynastyIdFromSlug(slug) {
+  return Object.keys(DYNASTIES).find(id => dynastySlug(id) === slug) || null;
+}
+
+// "View Full Dynasty" — jumps to the Rulers & Dynasties page with the same
+// dynasty highlighted as if its label/legend entry had been clicked there.
+function viewFullDynasty(ruler) {
+  if (!ruler || !ruler.dynasty) return;
+  openRulersPage();
+  setRpTab('all');
+  setRpDynastyFilter(ruler.dynasty);
+  document.querySelectorAll('.nav-link').forEach(x => x.classList.remove('active'));
+  const rdLink = document.querySelector('.nav-link[data-nav="rulers-dynasties"]');
+  if (rdLink) rdLink.classList.add('active');
+  setLocationPath('/rulers', dynastySlug(ruler.dynasty));
+}
+
+const RS_SLIDE_CLASSES = ['rs-slide-out-up', 'rs-slide-out-down', 'rs-slide-in-up', 'rs-slide-in-down'];
+
+function updateRulerCard(era, animate) {
+  const ruler   = getRuler(era.year);
+  const newIdx  = RULERS.indexOf(ruler);
+  if (newIdx === state.activeRulerIdx) return;
+  const prevIdx = state.activeRulerIdx;
+  state.activeRulerIdx = newIdx;
+
+  const shouldHide = ruler.hide === true;
+
+  if (animate) {
+    dom.rulerCard.classList.remove(...RS_SLIDE_CLASSES);
+    if (shouldHide) {
+      dom.rulerCard.classList.add('ruler-fade');
+      return;
+    }
+    // Slide the whole card in the direction of travel through history —
+    // forward (later years) reads as content rising up, backward as it
+    // settling down — instead of the plain crossfade used for the
+    // hidden/interregnum state above.
+    const backward = prevIdx !== -1 && newIdx < prevIdx;
+    const outClass = backward ? 'rs-slide-out-down' : 'rs-slide-out-up';
+    const inClass  = backward ? 'rs-slide-in-down'  : 'rs-slide-in-up';
+    dom.rulerCard.classList.remove('ruler-fade');
+    dom.rulerCard.classList.add(outClass);
+    setTimeout(() => {
+      applyRuler(ruler);
+      dom.rulerCard.classList.remove(outClass);
+      dom.rulerCard.classList.add(inClass);
+      void dom.rulerCard.offsetWidth; // force reflow so the "in" start position applies before animating
+      requestAnimationFrame(() => dom.rulerCard.classList.remove(inClass));
+    }, 300);
+  } else {
+    dom.rulerCard.classList.remove(...RS_SLIDE_CLASSES);
+    if (shouldHide) {
+      dom.rulerCard.classList.add('ruler-fade');
+    } else {
+      applyRuler(ruler);
+      dom.rulerCard.classList.remove('ruler-fade');
+    }
+  }
+}
+
+// Mobile-only "Succession / Administration" list — shows only the ruler
+// active during the current era, reusing the same RULERS ordering as the
+// desktop ruler card (see getRuler/applyRuler above).
+function renderSuccession(era) {
+  if (!dom.successionBlock || !dom.successionList) return;
+
+  if (era.isIntro) {
+    dom.successionBlock.hidden = true;
+    return;
+  }
+
+  const activeRuler = getRuler(era.year);
+  const idx   = RULERS.indexOf(activeRuler);
+  const items = [RULERS[idx]].filter(Boolean);
+
+  if (!items.length) {
+    dom.successionBlock.hidden = true;
+    return;
+  }
+
+  dom.successionBlock.hidden = false;
+  dom.successionList.innerHTML = items.map((r, i) => {
+    const portrait = r.image
+      ? `<img src="${r.image}" alt="Portrait of ${r.name}">`
+      : `<img class="succession-portrait-ph" src="img/logo.svg" alt="">`;
+    return `
+      <div class="succession-item ${i === 0 ? 'is-active' : ''}" data-ruler-idx="${RULERS.indexOf(r)}">
+        <div class="succession-card">
+          <div class="succession-portrait">${portrait}</div>
+          <div class="succession-info">
+            <span class="succession-name">${r.name}</span>
+            <span class="succession-role">${r.title}</span>
+            <span class="succession-period">Period: ${r.from} – ${r.to}</span>
+          </div>
+          <svg class="succession-chevron" viewBox="0 0 12 12" width="8" height="8" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+      </div>`;
+  }).join('');
+
+  dom.successionList.querySelectorAll('.succession-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const ruler = RULERS[Number(el.dataset.rulerIdx)];
+      if (ruler) openRulerProfileModal(ruler);
+    });
+  });
+}
+
+/* ─────────────────────────────────────────
+   RULERS & DYNASTIES (full page)
+───────────────────────────────────────── */
+const RP_AXIS_MIN = -1000;
+
+const RP_DYNASTY_ORDER = [
+  'prehistoric', 'roman-britain', 'early-kingdoms', 'wessex', 'denmark',
+  'godwin', 'norman', 'blois', 'plantagenet', 'lancaster', 'york', 'tudor',
+  'tudor-claimant', 'stuart', 'commonwealth', 'protectorate', 'orange',
+  'hanover', 'saxe-coburg-gotha', 'windsor',
+];
+// Reassigned by updateRpPageSize() once the row's real rendered width is
+// known — .rp-avatar's width is fluid (see CSS), so a fixed count would
+// either overflow on narrow screens or waste space on wide ones.
+let RP_PAGE_SIZE = 12;
+
+// `pageStart` is an absolute index into the current list (not a page
+// number) so a dynasty highlight can center on any index, not just one
+// that happens to land on a multiple of RP_PAGE_SIZE.
+const rpState = { tab: 'all', search: '', pageStart: 0, dynastyFilter: null, lastAllStart: null, axisMin: null, axisMax: null, built: false };
+let rpTooltipHideTimer = null;
+
+function rpDynastyInfo(ruler) {
+  return DYNASTIES[ruler.dynasty] || { label: ruler.dynasty || 'Unknown', color: '#888' };
+}
+
+// Most rulers belong to exactly one dynasty (`ruler.dynasty`), but a few —
+// e.g. Jogaila, who founded the Jagiellonian line while still reigning as a
+// Gediminid — belong to two. `ruler.dynasties`, when present, lists every
+// dynasty that should highlight/count that ruler as a member; `ruler.dynasty`
+// stays the single "primary" one used for the timeline run's color/band.
+function rulerDynasties(ruler) {
+  return ruler.dynasties || [ruler.dynasty];
+}
+
+function rpPortraitInner(ruler) {
+  if (ruler.image) return `<img src="${ruler.image}" alt="Portrait of ${ruler.name}" loading="lazy">`;
+  return `<svg class="rp-portrait-placeholder" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 20c1.2-4.2 4.4-6.5 8-6.5s6.8 2.3 8 6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+}
+
+function rpMatchesSearch(ruler, q) {
+  if (!q) return true;
+  const lq = normalizeSearchText(q);
+  return normalizeSearchText(ruler.name).includes(lq)
+    || normalizeSearchText(ruler.title).includes(lq)
+    || rulerDynasties(ruler).some(id => normalizeSearchText((DYNASTIES[id] || {}).label || id).includes(lq));
+}
+
+function getRpList() {
+  const q = rpState.search;
+  switch (rpState.tab) {
+    case 'grand-dukes':
+      return RULERS.filter(r => /\b(King|Queen)\b/i.test(r.title) && rpMatchesSearch(r, q));
+    case 'joint-rulers':
+      return RULERS.filter(r => r.jointRule && rpMatchesSearch(r, q));
+    case 'by-reign-length':
+      // Exclude placeholder/period entries (pre-state era, administrative interregnums) —
+      // they aren't individual reigns and would otherwise skew the ranking.
+      return RULERS.filter(r => r.from > 0
+          && r.reignLabel !== 'Period'
+          && rpMatchesSearch(r, q)
+          && (!rpState.dynastyFilter || rulerDynasties(r).includes(rpState.dynastyFilter)))
+        .sort((a, b) => (b.to - b.from) - (a.to - a.from));
+    default:
+      return RULERS.filter(r => rpMatchesSearch(r, q));
+  }
+}
+
+function renderRpLegend(dynastyIds, opts = {}) {
+  dom.rpLegend.innerHTML = dynastyIds.map(id => {
+    const d = DYNASTIES[id];
+    const dot = `<span class="rp-legend-dot" style="background:${d.color}"></span>`;
+    if (opts.clickable) {
+      const activeClass = rpState.dynastyFilter === id ? ' is-active' : '';
+      return `<button type="button" class="rp-legend-item is-clickable${activeClass}" data-dynasty="${id}" style="--legend-color:${d.color}">${dot}${d.label}</button>`;
+    }
+    return `<span class="rp-legend-item" style="--legend-color:${d.color}">${dot}${d.label}</span>`;
+  }).join('');
+}
+
+// Renders year ticks, dynasty name labels (alternating above/below the line
+// so adjacent runs never overlap), and the colored line + transition dots
+// for the given [minYear, maxYear] window over `items` (chronological).
+// When opts.clickable is set, labels become buttons that highlight that
+// dynasty (used on the All Rulers tab).
+function renderRpAxisAndTrack(minYear, maxYear, items, opts = {}) {
+  const span = Math.max(1, maxYear - minYear);
+  rpState.axisMin = minYear;
+  rpState.axisMax = maxYear;
+  rpHideRulerHighlight();
+
+  const niceSteps = [10, 25, 50, 100, 200];
+  const step = niceSteps.find(s => span / 6 <= s) || 250;
+  const ticks = [];
+  for (let y = Math.ceil(minYear / step) * step; y <= maxYear; y += step) ticks.push(y);
+  if (ticks[0] !== minYear) ticks.unshift(minYear);
+  if (ticks[ticks.length - 1] !== maxYear) ticks.push(maxYear);
+
+  dom.rpAxisTicks.innerHTML = ticks.map(y => {
+    const pct = ((y - minYear) / span) * 100;
+    return `<span class="rp-axis-tick" style="left:${pct}%">${y}</span>`;
+  }).join('');
+
+  // Group consecutive same-dynasty rulers into a single run for the label + line segment.
+  const runs = [];
+  for (const r of items) {
+    const last = runs[runs.length - 1];
+    const end = r.to || r.from;
+    if (last && last.dynasty === r.dynasty) {
+      last.end = Math.max(last.end, end);
+    } else {
+      runs.push({ dynasty: r.dynasty, start: r.from, end });
+    }
+  }
+
+  dom.rpDynastyLabels.innerHTML = runs.map((run, i) => {
+    const d = DYNASTIES[run.dynasty] || { label: run.dynasty, color: '#888' };
+    const startPct  = ((Math.max(run.start, minYear) - minYear) / span) * 100;
+    const endPct    = ((Math.min(run.end, maxYear) - minYear) / span) * 100;
+    const centerPct = (startPct + endPct) / 2;
+    const posClass  = i % 2 === 0 ? 'rp-dynasty-label--top' : 'rp-dynasty-label--bottom';
+    if (opts.clickable) {
+      const activeClass = rpState.dynastyFilter === run.dynasty ? ' is-active' : '';
+      return `<button type="button" class="rp-dynasty-label is-clickable ${posClass}${activeClass}" data-dynasty="${run.dynasty}" style="left:${centerPct}%; color:${d.color}">${d.label}</button>`;
+    }
+    return `<span class="rp-dynasty-label ${posClass}" style="left:${centerPct}%; color:${d.color}">${d.label}</span>`;
+  }).join('');
+
+  const segHtml = runs.map(run => {
+    const d     = DYNASTIES[run.dynasty] || { color: '#888' };
+    const left  = ((Math.max(run.start, minYear) - minYear) / span) * 100;
+    const width = ((Math.min(run.end, maxYear) - Math.max(run.start, minYear)) / span) * 100;
+    return `<div class="rp-segment" style="left:${left}%; width:${Math.max(width, 0.5)}%; background:${d.color}"></div>`;
+  }).join('');
+
+  const dotHtml = items.filter(r => r.from > minYear && r.from < maxYear).map(r => {
+    const left = ((r.from - minYear) / span) * 100;
+    return `<span class="rp-transition-dot" style="left:${left}%"></span>`;
+  }).join('');
+
+  dom.rpAxisBar.innerHTML = segHtml + dotHtml;
+
+  // Invisible-by-default per-ruler segments, thickened on avatar hover so a
+  // visitor can see exactly where in the timeline that reign falls.
+  dom.rpRulerTicks.innerHTML = items.map(r => {
+    const start = Math.max(r.from, minYear);
+    const end   = Math.max(Math.min(r.to || r.from, maxYear), start);
+    const left  = ((start - minYear) / span) * 100;
+    const width = ((end - start) / span) * 100;
+    const color = rpDynastyInfo(r).color;
+    return `<div class="rp-ruler-tick" data-idx="${RULERS.indexOf(r)}" style="left:${left}%; width:${Math.max(width, 0.4)}%; --rp-tick-color:${color}"></div>`;
+  }).join('');
+}
+
+function rpAvatarHTML(ruler, opts = {}) {
+  const idx = RULERS.indexOf(ruler);
+  let ringColor = opts.ringColor;
+  let dimmed = opts.dimmed;
+  // On tabs with clickable dynasty labels (All Rulers, Grand Dukes, Joint
+  // Rulers), a dynasty filter auto-highlights matching rulers and dims the
+  // rest, unless the caller already specified explicitly.
+  if (rpState.dynastyFilter && ringColor == null && dimmed == null) {
+    const isMatch = rulerDynasties(ruler).includes(rpState.dynastyFilter);
+    ringColor = isMatch ? DYNASTIES[rpState.dynastyFilter].color : null;
+    dimmed = !isMatch;
+  }
+  const ringStyle = ringColor ? ` style="--rp-ring:${ringColor}"` : '';
+  const dimClass = dimmed ? ' is-dimmed' : '';
+  const dynasty = rpDynastyInfo(ruler);
+  const reignYears = Math.max(0, (ruler.to || ruler.from) - ruler.from);
+  const durationHtml = opts.showDuration
+    ? `<span class="rp-avatar-duration">${reignYears} ${reignYears === 1 ? 'year' : 'years'}</span>`
+    : '';
+  return `
+    <button class="rp-avatar${dimClass}" type="button" data-idx="${idx}" aria-label="${ruler.name}"${ringStyle}>
+      <span class="rp-avatar-portrait">${rpPortraitInner(ruler)}</span>
+      ${durationHtml}
+      <span class="rp-avatar-info">
+        <span class="rp-avatar-name">${ruler.name}</span>
+        <span class="rp-avatar-years">${ruler.reign}</span>
+        <span class="rp-avatar-dynasty"><span class="rp-avatar-dynasty-dot" style="background:${dynasty.color}"></span>${dynasty.label}</span>
+      </span>
+    </button>`;
+}
+
+// Computes a tidy [minYear, maxYear] window around exactly the given items
+// (rounded to nearest 25 years, clamped to RP_AXIS_MIN, never narrower than
+// 50 years) — used so the axis only ever spans what's actually on screen.
+function rpWindowForItems(items) {
+  const years = items.flatMap(r => [Math.max(r.from, RP_AXIS_MIN), r.to || r.from]);
+  let minYear = Math.floor(Math.min(...years) / 25) * 25;
+  let maxYear = Math.ceil(Math.max(...years) / 25) * 25;
+  if (maxYear - minYear < 50) maxYear = minYear + 50;
+  return [minYear, maxYear];
+}
+
+// Renders a paginated, chronological row of avatars (used by every tab).
+// `direction` ('next' | 'prev' | null) controls whether the swap animates.
+// `clickableLabels` is set by the All Rulers tab so its per-page dynasty
+// labels can trigger the highlight view even though the axis itself stays
+// sized to the current page.
+function renderFlatAvatarRow(list, { direction = null, ringColor = null, clickableLabels = false } = {}) {
+  dom.rpPagePrev.hidden = false;
+
+  if (!list.length) {
+    applyAvatarsHtml(`<p class="rp-section-desc">No rulers match your search.</p>`, direction);
+    dom.rpPagePrev.disabled = true;
+    dom.rpLegend.innerHTML = ''; dom.rpAxisTicks.innerHTML = '';
+    dom.rpDynastyLabels.innerHTML = ''; dom.rpAxisBar.innerHTML = '';
+    return;
+  }
+
+  const maxStart = Math.max(0, list.length - RP_PAGE_SIZE);
+  rpState.pageStart = Math.max(0, Math.min(rpState.pageStart, maxStart));
+  const start = rpState.pageStart;
+  const pageItems = list.slice(start, start + RP_PAGE_SIZE);
+  const hasNext = start + RP_PAGE_SIZE < list.length;
+  if (clickableLabels) rpState.lastAllStart = start;
+
+  // The per-page-sized axis applies to every tab — it only ever spans the
+  // rulers actually on screen.
+  const [minYear, maxYear] = rpWindowForItems(pageItems);
+  // On All Rulers, the legend always lists every dynasty (a permanent
+  // "jump to" menu) even though the axis/avatar row below only show the
+  // current window. Other tabs — even ones with clickable labels, like
+  // Grand Dukes or Joint Rulers — keep a legend scoped to just the
+  // dynasties actually present on screen, not every dynasty site-wide.
+  const legendIds = rpState.tab === 'all' || rpState.tab === 'by-reign-length'
+    ? RP_DYNASTY_ORDER
+    : RP_DYNASTY_ORDER.filter(id => pageItems.some(r => rulerDynasties(r).includes(id)));
+  renderRpLegend(legendIds, { clickable: clickableLabels });
+  renderRpAxisAndTrack(minYear, maxYear, pageItems, { clickable: clickableLabels });
+  applyTimelineSlide(direction);
+
+  const moreHtml = hasNext ? `
+    <button class="rp-avatar-more" type="button" data-more="1" aria-label="Show more rulers">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M9 5L16 12L9 19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>` : '';
+
+  const showDuration = rpState.tab === 'by-reign-length';
+  applyAvatarsHtml(pageItems.map(r => rpAvatarHTML(r, { ringColor, showDuration })).join('') + moreHtml, direction);
+  dom.rpPagePrev.disabled = rpState.pageStart === 0;
+}
+
+// Returns the start index (into `fullList`) of the centered window for a
+// dynasty highlight, or null if that dynasty has no rulers in `fullList`.
+// Used only to pick which page to jump to when a dynasty label is first
+// clicked — after that, normal chronological paging takes over (see
+// renderFlatAvatarRow / rpNextPage / rpPrevPage), so a dynasty with more
+// rulers than fit on one page (e.g. Russian Imperial Administration) can
+// still be paged through in full via the arrows.
+function rpAllTabHighlightStart(fullList, dynastyId) {
+  const matchIdxs = [];
+  fullList.forEach((r, i) => { if (rulerDynasties(r).includes(dynastyId)) matchIdxs.push(i); });
+  if (!matchIdxs.length) return null;
+  // Center on the midpoint of the whole run (first..last match), not just
+  // the middle match — for a short run this keeps every member on screen
+  // instead of drifting toward one edge of the page.
+  const rangeMid = (matchIdxs[0] + matchIdxs[matchIdxs.length - 1]) / 2;
+  const start = Math.round(rangeMid - RP_PAGE_SIZE / 2);
+  return Math.max(0, Math.min(start, Math.max(0, fullList.length - RP_PAGE_SIZE)));
+}
+
+// Slides the axis/track (`.rp-timeline`) into place after its content has
+// already been re-rendered — used when a dynasty label click re-windows the
+// axis, so the zoom reads as a slide rather than an instant snap. Unlike
+// applyAvatarsHtml this has no "out" phase: the new window is already in the
+// DOM, so it just enters from the direction of travel.
+function applyTimelineSlide(direction) {
+  const el = dom.rpTimeline;
+  if (!direction || !el) return;
+  const inClass = direction === 'next' ? 'rp-anim-in-right' : 'rp-anim-in-left';
+  el.classList.add(inClass);
+  void el.offsetWidth; // force reflow so the start position applies before animating
+  requestAnimationFrame(() => el.classList.remove(inClass));
+}
+
+// Swaps `.rp-avatars`' content, sliding it out/in when `direction` is given.
+function applyAvatarsHtml(html, direction) {
+  const el = dom.rpAvatars;
+  if (!direction) { el.innerHTML = html; return; }
+  const outClass = direction === 'next' ? 'rp-anim-out-left' : 'rp-anim-out-right';
+  const inClass  = direction === 'next' ? 'rp-anim-in-right' : 'rp-anim-in-left';
+  el.classList.add(outClass);
+  setTimeout(() => {
+    el.innerHTML = html;
+    el.classList.remove(outClass);
+    el.classList.add(inClass);
+    void el.offsetWidth; // force reflow so the "in" start position applies before animating
+    requestAnimationFrame(() => el.classList.remove(inClass));
+  }, 220);
+}
+
+// Shows the selected dynasty's name, reign span, and a short intro between
+// the timeline and the avatar row — only on tabs with clickable dynasty
+// labels (All Rulers, Grand Dukes, Joint Rulers), where a dynasty
+// label/legend click highlights rather than filters the row.
+function rpDynastyYearRange(id) {
+  const members = RULERS.filter(r => rulerDynasties(r).includes(id));
+  if (!members.length) return null;
+  return {
+    from: Math.min(...members.map(r => r.from)),
+    to:   Math.max(...members.map(r => r.to || r.from)),
+  };
+}
+
+function renderRpDynastyInfo() {
+  const id = rpState.dynastyFilter;
+  if (!id) { dom.rpDynastyInfo.hidden = true; return; }
+
+  const d     = DYNASTIES[id];
+  const range = rpDynastyYearRange(id);
+  const years = range ? `${range.from === 0 ? '?' : range.from} &ndash; ${range.to}` : '';
+
+  dom.rpDynastyInfo.innerHTML = `
+    <div class="rp-dynasty-info-heading">
+      <h2 class="rp-dynasty-info-name" style="color:${d.color}">${d.label}</h2>
+      <span class="rp-dynasty-info-years">${years}</span>
+    </div>
+    <p class="rp-dynasty-info-desc">${d.description || ''}</p>
+  `;
+  dom.rpDynastyInfo.hidden = false;
+}
+
+// Dynasty labels/legend are clickable on these tabs. Chronological views
+// highlight and center a dynasty; "By Reign Length" filters the ranking.
+const RP_CLICKABLE_LABEL_TABS = ['all', 'grand-dukes', 'joint-rulers', 'by-reign-length'];
+
+function renderRulerAvatars(direction = null) {
+  hideRpTooltipImmediate();
+  renderRpDynastyInfo();
+
+  if (RP_CLICKABLE_LABEL_TABS.includes(rpState.tab)) {
+    // Whether or not a dynasty filter is active, this renders the normal
+    // paginated chronological row — rpAvatarHTML applies the highlight/dim
+    // styling per item when a filter is set, so a dynasty with more rulers
+    // than fit on one page can still be paged through via the arrows.
+    renderFlatAvatarRow(getRpList(), { direction, clickableLabels: true });
+    return;
+  }
+
+  renderFlatAvatarRow(getRpList(), { direction });
+}
+
+function setRpDynastyFilter(id) {
+  const turningOn = rpState.dynastyFilter !== id;
+  rpState.dynastyFilter = turningOn ? id : null;
+
+  if (rpState.tab === 'by-reign-length') {
+    rpState.pageStart = 0;
+    renderRulerAvatars();
+    return;
+  }
+
+  // Slide the timeline in the direction of travel, like the main app's
+  // yearly timeline, instead of snapping straight to the new window. Uses
+  // the current tab's own list (All Rulers, Grand Dukes, or Joint Rulers —
+  // whichever has clickable dynasty labels active) so indices line up.
+  let direction = null;
+  const fullList = getRpList();
+  const newStart = turningOn ? rpAllTabHighlightStart(fullList, id) : 0;
+  // Jump straight to the centering index — no more snapping to a page
+  // multiple, so short dynasty runs land fully on screen instead of
+  // drifting toward one edge (or off it) of the row.
+  rpState.pageStart = newStart === null ? 0 : newStart;
+  if (newStart !== null && rpState.lastAllStart != null && newStart !== rpState.lastAllStart) {
+    direction = newStart > rpState.lastAllStart ? 'next' : 'prev';
+  }
+
+  renderRulerAvatars(direction);
+}
+
+// Wraps setRpDynastyFilter for click handlers (legend swatch / timeline
+// label) so the URL reflects whichever dynasty is now active — #early-dukes
+// when toggled on, back to a bare /rulers when clicking the same one again
+// turns it off (setRpDynastyFilter's own toggle behavior).
+function setRpDynastyFilterAndSyncUrl(id) {
+  setRpDynastyFilter(id);
+  setLocationPath('/rulers', rpState.dynastyFilter ? dynastySlug(rpState.dynastyFilter) : '');
+}
+
+function rpNextPage() { rpState.pageStart += RP_PAGE_SIZE; renderRulerAvatars('next'); }
+function rpPrevPage() { rpState.pageStart = Math.max(0, rpState.pageStart - RP_PAGE_SIZE); renderRulerAvatars('prev'); }
+
+// Thickens the hovered ruler's own segment on the timeline and shows their
+// reign's start/end year right above it, so a visitor can see exactly where
+// in the timeline that reign falls.
+function rpShowRulerHighlight(ruler) {
+  // Always clear any previously-highlighted segment first — otherwise quick
+  // hover movement across rulers (faster than the tooltip's hide delay) can
+  // leave more than one segment thickened at once.
+  rpHideRulerHighlight();
+
+  if (rpState.axisMin == null) return;
+  const idx = RULERS.indexOf(ruler);
+  const tick = dom.rpRulerTicks.querySelector(`[data-idx="${idx}"]`);
+  if (!tick) return;
+  tick.classList.add('is-highlighted');
+  const color = rpDynastyInfo(ruler).color;
+
+  const span = Math.max(1, rpState.axisMax - rpState.axisMin);
+  const startYear = Math.max(ruler.from, rpState.axisMin);
+  const endYear   = Math.max(Math.min(ruler.to || ruler.from, rpState.axisMax), startYear);
+  const startPct  = ((startYear - rpState.axisMin) / span) * 100;
+  const endPct    = ((endYear - rpState.axisMin) / span) * 100;
+
+  dom.rpHoverYearStart.textContent = ruler.from === 0 ? '?' : ruler.from;
+  dom.rpHoverYearStart.style.left  = `${startPct}%`;
+  dom.rpHoverYearStart.style.color = color;
+  dom.rpHoverYearStart.classList.add('is-visible');
+
+  dom.rpHoverYearEnd.textContent = ruler.to || ruler.from;
+  dom.rpHoverYearEnd.style.left  = `${endPct}%`;
+  dom.rpHoverYearEnd.style.color = color;
+  dom.rpHoverYearEnd.classList.toggle('is-visible', endPct !== startPct);
+}
+
+function rpHideRulerHighlight() {
+  dom.rpRulerTicks.querySelectorAll('.rp-ruler-tick.is-highlighted').forEach(el => el.classList.remove('is-highlighted'));
+  dom.rpHoverYearStart.classList.remove('is-visible');
+  dom.rpHoverYearEnd.classList.remove('is-visible');
+}
+
+// Cuts text to at most maxLen characters, breaking at the last whole word
+// so the tooltip bio never grows tall enough to cover neighboring rulers.
+function truncateText(text, maxLen) {
+  if (!text || text.length <= maxLen) return text || '';
+  const cut = text.slice(0, maxLen);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${cut.slice(0, lastSpace > 0 ? lastSpace : maxLen)}…`;
+}
+
+function showRpTooltip(ruler, anchorEl) {
+  clearTimeout(rpTooltipHideTimer);
+  rpShowRulerHighlight(ruler);
+  const d = rpDynastyInfo(ruler);
+  dom.rpTooltip.innerHTML = `
+    <div class="rp-detail-body">
+      <h3 class="rp-detail-name">${ruler.name}</h3>
+      <p class="rp-detail-meta">${ruler.reign} &middot; ${d.label}</p>
+      <p class="rp-detail-bio">${truncateText(ruler.bio, 200)}</p>
+      <button type="button" class="rp-detail-profile-link" id="rp-profile-link">View full profile &rarr;</button>
+    </div>`;
+  document.getElementById('rp-profile-link').addEventListener('click', () => openRulerProfileModal(ruler));
+  dom.rpTooltip.dataset.rulerIdx = String(RULERS.indexOf(ruler));
+  dom.rpTooltip.hidden = false;
+
+  const rowRect      = dom.rpAvatars.parentElement.getBoundingClientRect();
+  const anchorRect   = anchorEl.getBoundingClientRect();
+  const gap          = 14;
+  const tooltipWidth = 360;
+  const tooltipHeight = dom.rpTooltip.offsetHeight;
+
+  let flipped = false;
+  let left = (anchorRect.right - rowRect.left) + gap;
+  if (left + tooltipWidth > rowRect.width) {
+    // Not enough room to the right — show it to the left of the avatar instead.
+    left = (anchorRect.left - rowRect.left) - gap - tooltipWidth;
+    flipped = true;
+  }
+  left = Math.max(4, left);
+
+  // Centre the tooltip on the anchor's vertical midpoint, then clamp so it
+  // never runs off the top/bottom of the viewport (it used to only offset
+  // 30px above the anchor, which pushed tall tooltips below the fold).
+  const anchorCenterY = anchorRect.top + anchorRect.height / 2;
+  const viewportMargin = 12;
+  const idealViewportTop = anchorCenterY - tooltipHeight / 2;
+  const maxViewportTop   = window.innerHeight - tooltipHeight - viewportMargin;
+  const clampedViewportTop = Math.max(viewportMargin, Math.min(idealViewportTop, maxViewportTop));
+  const top = clampedViewportTop - rowRect.top;
+
+  // Point the little arrow at the anchor's centre, wherever the tooltip
+  // itself landed after clamping.
+  const arrowTop = Math.max(20, Math.min(anchorCenterY - clampedViewportTop, tooltipHeight - 20));
+
+  dom.rpTooltip.style.left = `${left}px`;
+  dom.rpTooltip.style.top  = `${top}px`;
+  dom.rpTooltip.style.setProperty('--rp-arrow-top', `${arrowTop}px`);
+  dom.rpTooltip.classList.toggle('is-flipped', flipped);
+
+  requestAnimationFrame(() => dom.rpTooltip.classList.add('is-visible'));
+}
+
+function hideRpTooltip() {
+  dom.rpTooltip.classList.remove('is-visible');
+  delete dom.rpTooltip.dataset.rulerIdx;
+  rpHideRulerHighlight();
+}
+
+function hideRpTooltipImmediate() {
+  clearTimeout(rpTooltipHideTimer);
+  dom.rpTooltip.classList.remove('is-visible');
+  dom.rpTooltip.innerHTML = '';
+  delete dom.rpTooltip.dataset.rulerIdx;
+  rpHideRulerHighlight();
+}
+
+function scheduleHideRpTooltip() {
+  clearTimeout(rpTooltipHideTimer);
+  rpTooltipHideTimer = setTimeout(hideRpTooltip, 150);
+}
+
+// Adjacent ruler in the RULERS timeline — used for the Predecessor/Successor
+// row. The array is already chronological, so this is plain index adjacency,
+// not a stored relationship (avoids duplicating data that can go stale).
+function getAdjacentRuler(ruler, dir) {
+  const idx = RULERS.indexOf(ruler);
+  return RULERS[idx + dir] || null;
+}
+
+// Gendered icons for family-tree nodes whose role implies a known gender
+// (father = male, mother/wife = female) — a head-circle plus either
+// squared shoulders (male) or a flared dress silhouette (female). Children
+// aren't gendered this way since rulers.json has no per-child gender field.
+const RP_MALE_ICON = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><circle cx="12" cy="7.5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 20v-3c0-2.8 2.9-4.7 6.5-4.7s6.5 1.9 6.5 4.7v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const RP_FEMALE_ICON = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><circle cx="12" cy="7.5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.6 12.2L5.5 20h13l-4.1-7.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+// Pulls the first 3-4 digit year out of a born/died value, which may be a
+// plain number, an approximate "c. YYYY" string, or an "alive" sentinel.
+function rpParseYear(val) {
+  if (val == null) return null;
+  const m = String(val).match(/\d{3,4}/);
+  return m ? Number(m[0]) : null;
+}
+
+// "born – died (aged N)" (escaped), built from ruler.born/ruler.died (each a
+// year, an approximate "c. YYYY" string, or omitted where genuinely
+// unknown). ruler.died === 'alive' covers living rulers, whose current age
+// is computed the same way Wikipedia infoboxes do. Returns '' when neither
+// is known.
+function rpBornDiedLine(ruler) {
+  if (!ruler.born && !ruler.died) return '';
+
+  const bornYear = rpParseYear(ruler.born);
+  const endYear = ruler.died === 'alive' ? new Date().getFullYear() : rpParseYear(ruler.died);
+  let ageSuffix = '';
+  if (bornYear != null && endYear != null && endYear >= bornYear) {
+    const isApprox = /c\.|circa/i.test(String(ruler.born)) || /c\.|circa/i.test(String(ruler.died));
+    const age = endYear - bornYear;
+    const label = ruler.died === 'alive' ? 'age' : 'aged';
+    ageSuffix = ` (${isApprox ? '~' : ''}${label} ${age})`;
+  }
+
+  const bornValue = String(ruler.born || 'Unknown');
+  const diedValue = ruler.died === 'alive' ? 'Living' : String(ruler.died || 'Unknown');
+  return escapeHtml(`${bornValue} – ${diedValue}${ageSuffix}`);
+}
+
+// Portrait caption (small badge over the photo in the modal) — falls back
+// to the reign years for the handful of rulers with no recorded born/died
+// (e.g. a prehistoric period).
+function rpPortraitCaptionDates(ruler) {
+  return rpBornDiedLine(ruler) || escapeHtml(ruler.reign);
+}
+
+// Richer caption shown under the full-size portrait lightbox — name, title,
+// born/died (with age), and reign, since there's room to spell all of it out.
+function rpFullPortraitCaptionHtml(ruler) {
+  const bornDied = rpBornDiedLine(ruler);
+  return `
+    <span class="image-lightbox-caption-name">${escapeHtml(ruler.name)}</span>
+    <span class="image-lightbox-caption-title">${escapeHtml(ruler.title)}</span>
+    ${bornDied ? `<span class="image-lightbox-caption-dates">${bornDied}</span>` : ''}
+    <span class="image-lightbox-caption-reign">Reign: ${escapeHtml(ruler.reign)}</span>`;
+}
+const RP_CROWN_ICON = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 18h18v2H3z" fill="currentColor"/><path d="M4 16L2.5 7l5 3.2L12 4l4.5 6.2 5-3.2L20 16H4z" fill="currentColor"/></svg>`;
+const RP_PEOPLE_ICON = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="16.5" cy="9.2" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 20c1-3.6 3.7-5.6 6.5-5.6s5.5 2 6.5 5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M15 20c.6-2.7 2.3-4.5 4.5-4.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+
+// Builds the "Family" tree (parents / ruler / known children) shown beside
+// the portrait. Only rulers researched down to the elective monarchs have
+// `family` data in rulers.json — later dynasties simply omit the key and
+// this section is skipped entirely.
+function rpFamilyHtml(ruler) {
+  const family = ruler.family;
+  if (!family) return '';
+
+  const parentNode = (label, name, icon) => `
+    <div class="rp-family-node">
+      <span class="rp-family-node-icon">${icon}</span>
+      <span class="rp-family-node-text">
+        <span class="rp-family-node-label">${label}</span>
+        <span class="rp-family-node-name">${escapeHtml(name || 'Unknown')}</span>
+      </span>
+    </div>`;
+
+  const wives = Array.isArray(family.wife) ? family.wife : (family.wife ? [family.wife] : []);
+  const wifeHtml = wives.length ? `
+      <div class="rp-family-stem"></div>
+      <span class="rp-family-group-label">${wives.length > 1 ? 'Wives' : 'Wife'}</span>
+      <div class="rp-family-row">
+        ${wives.map(w => `
+          <div class="rp-family-node">
+            <span class="rp-family-node-icon">${RP_FEMALE_ICON}</span>
+            <span class="rp-family-node-text">
+              <span class="rp-family-node-name">${escapeHtml(w)}</span>
+            </span>
+          </div>`).join('')}
+      </div>` : '';
+
+  const children = Array.isArray(family.children) ? family.children : [];
+  const childrenHtml = children.length ? `
+      <div class="rp-family-stem"></div>
+      <div class="rp-family-bar"></div>
+      <span class="rp-family-group-label">Children (known)</span>
+      <div class="rp-family-row">
+        ${children.map(c => `
+          <div class="rp-family-node">
+            <span class="rp-family-node-text">
+              <span class="rp-family-node-name">${escapeHtml(c.name)}</span>
+              ${c.note ? `<span class="rp-family-node-years">${escapeHtml(c.note)}</span>` : ''}
+            </span>
+          </div>`).join('')}
+      </div>
+      ${family.childrenNote ? `<p class="rp-family-note">${escapeHtml(family.childrenNote)}</p>` : ''}` : '';
+
+  return `
+    <div class="rp-family">
+      <div class="rp-family-heading">
+        <h3 class="rp-family-main-title">Family Tree</h3>
+        <div class="rp-family-fancy-divider" aria-hidden="true"><span class="rp-family-fancy-divider-dot"></span></div>
+      </div>
+      <span class="rp-family-group-label">Parents</span>
+      <div class="rp-family-row">
+        ${parentNode('Father', family.father, RP_MALE_ICON)}
+        ${parentNode('Mother', family.mother, RP_FEMALE_ICON)}
+      </div>
+      <div class="rp-family-bar rp-family-bar--bottom"></div>
+      <div class="rp-family-stem"></div>
+      <div class="rp-family-self">
+        <div class="rp-family-self-box">
+          ${RP_CROWN_ICON}
+          <span class="rp-family-self-name">${escapeHtml(ruler.name)}</span>
+          <span class="rp-family-self-years">${escapeHtml(ruler.reign)}</span>
+        </div>
+      </div>
+      ${wifeHtml}
+      ${childrenHtml}
+    </div>`;
+}
+
+// Compact "Family Tree" card shown in the media column — parents/wife/
+// children reduced to a glance summary, with a button that opens the full
+// tree (rpFamilyHtml above) in a separate lightbox, since the full tree is
+// too tall to sit permanently between the portrait and predecessor/
+// successor strip.
+function rpFamilySummaryHtml(ruler) {
+  const family = ruler.family;
+  if (!family) return '';
+
+  const wives = Array.isArray(family.wife) ? family.wife : (family.wife ? [family.wife] : []);
+  const children = Array.isArray(family.children) ? family.children : [];
+  const wifeLabel = wives.length > 1 ? 'Wives' : 'Wife';
+  const totalMembers = 2 + Math.max(wives.length, 1) + children.length;
+
+  const person = (name, icon) => `
+    <div class="rp-family-summary-person">
+      <span class="rp-family-summary-avatar">${icon}</span>
+      <span class="rp-family-summary-name">${escapeHtml(name || 'Unknown')}</span>
+    </div>`;
+
+  const childrenGroup = children.length ? `
+    <span class="rp-family-summary-divider" aria-hidden="true"></span>
+    <div class="rp-family-summary-group">
+      <span class="rp-family-summary-label">Children</span>
+      <div class="rp-family-summary-people">
+        <div class="rp-family-summary-person rp-family-summary-person--count">
+          <span class="rp-family-summary-avatar rp-family-summary-avatar--count">${RP_PEOPLE_ICON}</span>
+          <span class="rp-family-summary-count">${children.length}</span>
+        </div>
+      </div>
+    </div>` : '';
+
+  return `
+    <div class="rp-family-summary">
+      <div class="rp-family-summary-heading">
+        <span class="rp-family-summary-line" aria-hidden="true"></span>
+        <h3 class="rp-family-summary-title">Family Tree</h3>
+        <span class="rp-family-summary-line" aria-hidden="true"></span>
+      </div>
+      <div class="rp-family-summary-groups">
+        <div class="rp-family-summary-group">
+          <span class="rp-family-summary-label">Parents</span>
+          <div class="rp-family-summary-people">
+            ${person(family.father, RP_MALE_ICON)}
+            ${person(family.mother, RP_FEMALE_ICON)}
+          </div>
+        </div>
+        <span class="rp-family-summary-divider" aria-hidden="true"></span>
+        <div class="rp-family-summary-group">
+          <span class="rp-family-summary-label">${wifeLabel}</span>
+          <div class="rp-family-summary-people">
+            ${person(wives[0], RP_FEMALE_ICON)}
+          </div>
+        </div>
+        ${childrenGroup}
+      </div>
+      <button type="button" class="rp-family-summary-btn">
+        <span class="rp-family-summary-btn-main">
+          <span class="rp-family-summary-btn-icon">${RP_PEOPLE_ICON}</span>
+          <span>View family tree</span>
+        </span>
+        <svg class="rp-family-summary-btn-arrow" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <p class="rp-family-summary-hint">Click to expand &bull; ${totalMembers} family members</p>
+    </div>`;
+}
+
+// Rulers without genealogy data (elective monarchs onward — see
+// .rp-modal-grid's default comment) get this events column instead of a
+// family tree: every timeline event that falls within their reign's
+// from/to years, reusing the same era/event data the timeline itself uses.
+function rpEventsForRuler(ruler) {
+  if (ruler.from == null) return [];
+  return rpEventsInRanges([[ruler.from, ruler.to ?? ruler.from]]);
+}
+
+// Timeline events whose year falls inside any of the [from, to] ranges
+// (a ruler's reign, or each of a prime minister's terms).
+function rpEventsInRanges(ranges) {
+  const items = [];
+  state.eras.forEach((era, eraIdx) => {
+    if (era.isIntro || era.year == null) return;
+    if (!ranges.some(([from, to]) => era.year >= from && era.year <= to)) return;
+    era.events.forEach((event, eventIndex) => {
+      items.push({ eraIdx, eventIndex, year: era.year, event });
+    });
+  });
+  return items;
+}
+
+function rpEventsHtml(ruler, { items = rpEventsForRuler(ruler), heading = 'Events During Reign', empty = 'No recorded events during this reign.' } = {}) {
+
+  // Consecutive events in the same year only show the year once, on the
+  // first of the group — repeating it for every title read as noisy.
+  let lastYear = null;
+  const rows = items.map(({ eraIdx, eventIndex, year, event }) => {
+    const showYear = year !== lastYear;
+    lastYear = year;
+    return `
+          <div class="rp-events-item${showYear ? '' : ' rp-events-item--grouped'}" data-era-idx="${eraIdx}" data-event-index="${eventIndex}" role="button" tabindex="0">
+            <span class="rp-events-year">${showYear ? year : ''}</span>
+            <div class="rp-events-text">
+              <span class="rp-events-title">${escapeHtml(event.title)}</span>
+            </div>
+          </div>`;
+  }).join('');
+
+  // The column stays put even for sparsely-documented rulers (e.g.
+  // Butvydas) rather than disappearing — a "none recorded" note is more
+  // honest than silently dropping the whole section.
+  const body = items.length
+    ? `<div class="rp-events-list">${rows}</div>`
+    : `<p class="rp-events-empty">${empty}</p>`;
+
+  return `
+    <div class="rp-events">
+      <div class="em-world-heading"><span>${heading}</span></div>
+      ${body}
+    </div>`;
+}
+
+// Single floating tooltip reused for every "Events During Reign" title —
+// created lazily on first use rather than living in index.html since it's
+// only ever needed inside the ruler profile modal.
+let rpEventTooltipEl = null;
+function getRpEventTooltipEl() {
+  if (!rpEventTooltipEl) {
+    rpEventTooltipEl = document.createElement('div');
+    rpEventTooltipEl.className = 'rp-event-tooltip';
+    rpEventTooltipEl.setAttribute('role', 'tooltip');
+    document.body.appendChild(rpEventTooltipEl);
+  }
+  return rpEventTooltipEl;
+}
+
+function showRpEventTooltip(text, anchorEl) {
+  if (!text) return;
+  const el = getRpEventTooltipEl();
+  el.textContent = text;
+  el.classList.add('is-visible');
+
+  const anchorRect = anchorEl.getBoundingClientRect();
+  const gap = 10;
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+
+  const left = Math.min(Math.max(12, anchorRect.left), window.innerWidth - width - 12);
+  let top = anchorRect.top - height - gap;
+  if (top < 12) top = anchorRect.bottom + gap;
+
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
+function hideRpEventTooltip() {
+  if (rpEventTooltipEl) rpEventTooltipEl.classList.remove('is-visible');
+}
+
+function rpPredSuccHtml(ruler) {
+  const prev = getAdjacentRuler(ruler, -1);
+  const next = getAdjacentRuler(ruler, 1);
+  // Prehistoric Britain is a period, not an individual predecessor.
+  const prevIsPlaceholder = prev && prev.reignLabel === 'Period';
+  const col = (label, r) => `
+    <div class="rp-predsucc-col${r ? ' is-clickable' : ''}"${r ? ` data-ruler-idx="${RULERS.indexOf(r)}" role="button" tabindex="0"` : ''}>
+      <span class="rp-predsucc-label">${label}</span>
+      <span class="rp-predsucc-name">${r ? escapeHtml(r.name) : (label === 'Successor' ? 'Incumbent' : 'First recorded ruler')}</span>
+      ${r ? `<span class="rp-predsucc-years">${escapeHtml(r.reign)}</span>` : ''}
+    </div>`;
+
+  return `
+    <div class="rp-succession">
+      <div class="em-power-heading"><span>Succession Line</span></div>
+      <div class="rp-predsucc">
+        ${col('Predecessor', prevIsPlaceholder ? null : prev)}
+        <span class="rp-predsucc-divider" aria-hidden="true"></span>
+        ${col('Successor', next)}
+      </div>
+    </div>`;
+}
+
+function openRulerProfileModal(ruler) {
+  // Every path that opens a ruler profile (avatar click, predecessor/
+  // successor link, "who was in power" card, direct URL) funnels through
+  // here, so updating the URL in this one place gives every one of them a
+  // real, shareable /rulers/{slug} address for free.
+  const slug = rulerSlug(ruler);
+  if (slug) setLocationPath('/rulers/' + slug);
+
+  const d = rpDynastyInfo(ruler);
+  state.modalEvent = null;
+  state.modalRuler = ruler;
+  state.modalPm = null;
+  state.modalReturnRuler = null;
+  dom.modalYearTag.textContent = '';
+  dom.modalTitle.textContent   = ruler.name;
+  dom.modal.classList.remove('em-modal', 'map-modal', 'bibliography-modal', 'author-modal', 'legacy-modal');
+  dom.modal.classList.add('rp-profile-modal');
+  updateModalNavigation();
+
+  // Always rendered, even without a Wikipedia link — every ruler modal
+  // needs a way to report a mistake, not just the ones with sources.
+  const sourceLinksHtml = ruler.wikipedia ? `
+      <div class="modal-source-links">
+        <span class="modal-source-label"><span class="em-source-icon">${EM_ICON_BOOK}</span>Sources &amp; further reading</span>
+        <div class="modal-source-list">
+          <a href="${ruler.wikipedia}" target="_blank" rel="noopener noreferrer">Wikipedia <span aria-hidden="true">&#8599;</span></a>
+        </div>
+      </div>` : '';
+  const sourceLink = `
+    <div class="modal-source">${sourceLinksHtml}
+      <button type="button" class="modal-mistake-btn">
+        <svg class="modal-mistake-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="8" y1="4.8" x2="8" y2="8.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
+        Noticed a mistake or have suggestions?
+      </button>
+    </div>`;
+
+  const accomplishments = Array.isArray(ruler.accomplishments) && ruler.accomplishments.length ? `
+    <div class="em-power-heading"><span>Main Accomplishments</span></div>
+    <ul class="rp-accomplishments">
+      ${ruler.accomplishments.map(a => `<li>${escapeHtml(a)}</li>`).join('')}
+    </ul>` : '';
+
+  const hasFamily = Boolean(ruler.family);
+  // The events column (whatever happened during the reign, or a note that
+  // none are recorded) always occupies the third column now; the family
+  // tree, when researched, is a compact summary card in the media column
+  // below the portrait — the full tree (rpFamilyHtml) opens in its own
+  // lightbox on demand, since it's too tall to sit permanently there
+  // alongside the portrait.
+  const familySummaryHtml = hasFamily ? rpFamilySummaryHtml(ruler) : '';
+  const eventsHtml = rpEventsHtml(ruler);
+
+  dom.modalBody.innerHTML = `
+    <div class="rp-modal-grid has-family">
+      <div class="rp-modal-left">
+        <span class="rp-modal-tag"><span class="rp-modal-tag-label">Reign:</span> ${escapeHtml(ruler.reign)} <span class="rp-modal-tag-sep" aria-hidden="true">&#10022;</span> ${escapeHtml(d.label)}</span>
+        <p class="rp-modal-title-line">${escapeHtml(ruler.title)}</p>
+        <div class="modal-divider"></div>
+        <p class="rp-modal-bio">${escapeHtml(ruler.bio || '')}</p>
+        ${accomplishments}
+        ${rpPredSuccHtml(ruler)}
+      </div>
+      <div class="rp-modal-media">
+        <div class="rp-modal-portrait${ruler.image ? ' is-zoomable' : ''}" ${ruler.image ? 'role="button" tabindex="0" aria-label="Expand portrait"' : ''}>
+          ${rpPortraitInner(ruler)}
+          <div class="rp-modal-portrait-caption">
+            <span class="rp-modal-portrait-name">${escapeHtml(ruler.name)}</span>
+            <span class="rp-modal-portrait-years">${rpPortraitCaptionDates(ruler)}</span>
+          </div>
+          ${ruler.image ? `<span class="rp-modal-portrait-zoom" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>` : ''}
+        </div>
+        ${ruler.image && ruler.wikipedia ? `<a class="rp-modal-portrait-attribution" href="${ruler.wikipedia}" target="_blank" rel="noopener noreferrer">Portrait via Wikipedia</a>` : ''}
+        ${familySummaryHtml}
+      </div>
+      <div class="rp-modal-right">${eventsHtml}</div>
+    </div>
+    ${sourceLink}`;
+
+  const mistakeBtn = dom.modalBody.querySelector('.modal-mistake-btn');
+  if (mistakeBtn) mistakeBtn.addEventListener('click', openContactModal);
+
+  const familyTreeBtn = dom.modalBody.querySelector('.rp-family-summary-btn');
+  if (familyTreeBtn) familyTreeBtn.addEventListener('click', () => openFamilyTreeLightbox(ruler, familyTreeBtn));
+
+  // Opening an event from here should fade it in over this ruler's modal
+  // and, on close, fade back into this same profile rather than dropping
+  // all the way back to the timeline.
+  bindRpEventsList(() => { state.modalReturnRuler = ruler; });
+
+  if (ruler.image) {
+    const portraitEl = dom.modalBody.querySelector('.rp-modal-portrait');
+    const openPortraitLightbox = () => openImageLightbox({
+      src: ruler.image,
+      alt: `Portrait of ${ruler.name}`,
+      captionHtml: rpFullPortraitCaptionHtml(ruler),
+    }, portraitEl);
+    portraitEl.addEventListener('click', openPortraitLightbox);
+    portraitEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPortraitLightbox(); }
+    });
+  }
+
+  dom.modalBody.querySelectorAll('.rp-predsucc-col[data-ruler-idx]').forEach(col => {
+    const open = () => fadeSwapModal(() => openRulerProfileModal(RULERS[Number(col.dataset.rulerIdx)]));
+    col.addEventListener('click', open);
+    col.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  });
+
+  dom.modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.modalPanel.classList.add('is-open');
+  }));
+}
+
+// Click/keyboard/tooltip wiring for an "Events During Reign"-style list in
+// the open profile modal; setReturn records where closing the event lands.
+function bindRpEventsList(setReturn) {
+  dom.modalBody.querySelectorAll('.rp-events-item').forEach(el => {
+    const era = state.eras[Number(el.dataset.eraIdx)];
+    const event = era && era.events[Number(el.dataset.eventIndex)];
+    const open = () => {
+      if (!era) return;
+      // The hover tooltip has no reason to linger once its title has been
+      // clicked and the event modal is on its way in.
+      hideRpEventTooltip();
+      setReturn();
+      fadeSwapModal(() => openModal(era, Number(el.dataset.eventIndex)));
+    };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+
+    const titleEl = el.querySelector('.rp-events-title');
+    if (titleEl && event && event.text) {
+      titleEl.addEventListener('mouseenter', () => showRpEventTooltip(event.text, titleEl));
+      titleEl.addEventListener('mouseleave', hideRpEventTooltip);
+      titleEl.addEventListener('focus', () => showRpEventTooltip(event.text, titleEl));
+      titleEl.addEventListener('blur', hideRpEventTooltip);
+    }
+  });
+}
+
+/* ─────────────────────────────────────────
+   PRIME MINISTER PROFILE — same three-column template as the ruler
+   profile, filled from the #pm-data JSON that
+   includes/prime-ministers-view.php embeds in the Prime Ministers page.
+───────────────────────────────────────── */
+let pmDataCache = null;
+function pmData() {
+  const el = document.getElementById('pm-data');
+  if (!el) return null;
+  if (!pmDataCache || pmDataCache.el !== el) pmDataCache = { el, data: JSON.parse(el.textContent) };
+  return pmDataCache.data;
+}
+
+function pmById(id) {
+  const data = pmData();
+  return data ? data.pms.find(pm => pm.id === id) || null : null;
+}
+
+function getAdjacentPm(pm, dir) {
+  const pms = pmData().pms;
+  return pms[pms.indexOf(pm) + dir] || null;
+}
+
+function pmInOffice(pm) {
+  const first = pm.terms[0], last = pm.terms[pm.terms.length - 1];
+  if (last.endYear === null) return `${first.startYear} – present`;
+  return first.startYear === last.endYear ? String(first.startYear) : `${first.startYear} – ${last.endYear}`;
+}
+
+function openPmProfileModal(id) {
+  const pm = pmById(id);
+  if (!pm) return;
+  setLocationPath('/rulers/prime-ministers/' + pm.id);
+
+  const data = pmData();
+  const parties = pm.partyIds.map(p => data.partyLabels[p]).join(' / ');
+  const inOffice = pmInOffice(pm);
+  state.modalEvent = null;
+  state.modalRuler = null;
+  state.modalPm = pm;
+  state.modalReturnPm = null;
+  dom.modalYearTag.textContent = '';
+  dom.modalTitle.textContent   = pm.name;
+  dom.modal.classList.remove('em-modal', 'map-modal', 'bibliography-modal', 'author-modal', 'legacy-modal');
+  dom.modal.classList.add('rp-profile-modal');
+  updateModalNavigation();
+
+  const facts = [
+    ['Party', parties],
+    ['Time in office', pm.terms.length > 1 ? `${pm.office} across ${pm.terms.length} terms (${pm.termList})` : pm.office],
+    ['Served under', pm.served.join(', ')],
+  ];
+  const col = (label, other) => `
+    <div class="rp-predsucc-col${other ? ' is-clickable' : ''}"${other ? ` data-pm-id="${escapeHtml(other.id)}" role="button" tabindex="0"` : ''}>
+      <span class="rp-predsucc-label">${label}</span>
+      <span class="rp-predsucc-name">${other ? escapeHtml(other.name) : (label === 'Successor' ? 'Incumbent' : 'First prime minister')}</span>
+      ${other ? `<span class="rp-predsucc-years">${escapeHtml(pmInOffice(other))}</span>` : ''}
+    </div>`;
+  const events = rpEventsInRanges(pm.terms.map(t => [t.startYear, t.endYear ?? new Date().getFullYear()]));
+
+  dom.modalBody.innerHTML = `
+    <div class="rp-modal-grid has-family">
+      <div class="rp-modal-left">
+        <span class="rp-modal-tag"><span class="rp-modal-tag-label">In office:</span> ${escapeHtml(inOffice)} <span class="rp-modal-tag-sep" aria-hidden="true">&#10022;</span> ${escapeHtml(parties)}</span>
+        <p class="rp-modal-title-line">${escapeHtml(pm.title)}</p>
+        <div class="modal-divider"></div>
+        <p class="rp-modal-bio">${escapeHtml(pm.known)}</p>
+        <div class="em-power-heading"><span>In Office</span></div>
+        <ul class="rp-accomplishments">
+          ${facts.map(([k, v]) => `<li><strong>${k}:</strong> ${escapeHtml(v)}</li>`).join('')}
+        </ul>
+        <div class="rp-succession">
+          <div class="em-power-heading"><span>Succession Line</span></div>
+          <div class="rp-predsucc">
+            ${col('Predecessor', getAdjacentPm(pm, -1))}
+            <span class="rp-predsucc-divider" aria-hidden="true"></span>
+            ${col('Successor', getAdjacentPm(pm, 1))}
+          </div>
+        </div>
+      </div>
+      <div class="rp-modal-media">
+        <div class="rp-modal-portrait${pm.image ? ' is-zoomable' : ''}" ${pm.image ? 'role="button" tabindex="0" aria-label="Expand portrait"' : ''}>
+          ${rpPortraitInner(pm)}
+          <div class="rp-modal-portrait-caption">
+            <span class="rp-modal-portrait-name">${escapeHtml(pm.name)}</span>
+            <span class="rp-modal-portrait-years">In office ${escapeHtml(inOffice)}</span>
+          </div>
+          ${pm.image ? `<span class="rp-modal-portrait-zoom" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>` : ''}
+        </div>
+        ${pm.image ? `<a class="rp-modal-portrait-attribution" href="${escapeHtml(pm.wiki)}" target="_blank" rel="noopener noreferrer">Portrait via Wikipedia</a>` : ''}
+      </div>
+      <div class="rp-modal-right">${rpEventsHtml(pm, { items: events, heading: 'Events in Office', empty: 'No recorded events during this time in office.' })}</div>
+    </div>
+    <div class="modal-source">
+      <div class="modal-source-links">
+        <span class="modal-source-label"><span class="em-source-icon">${EM_ICON_BOOK}</span>Sources &amp; further reading</span>
+        <div class="modal-source-list">
+          <a href="${escapeHtml(pm.wiki)}" target="_blank" rel="noopener noreferrer">Wikipedia <span aria-hidden="true">&#8599;</span></a>
+        </div>
+      </div>
+      <button type="button" class="modal-mistake-btn">
+        <svg class="modal-mistake-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="8" y1="4.8" x2="8" y2="8.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
+        Noticed a mistake or have suggestions?
+      </button>
+    </div>`;
+
+  dom.modalBody.querySelector('.modal-mistake-btn').addEventListener('click', openContactModal);
+  bindRpEventsList(() => { state.modalReturnPm = pm.id; });
+
+  if (pm.image) {
+    const portraitEl = dom.modalBody.querySelector('.rp-modal-portrait');
+    const openPortraitLightbox = () => openImageLightbox({
+      src: pm.image,
+      alt: `Portrait of ${pm.name}`,
+      captionHtml: `
+        <span class="image-lightbox-caption-name">${escapeHtml(pm.name)}</span>
+        <span class="image-lightbox-caption-title">${escapeHtml(pm.title)}</span>
+        <span class="image-lightbox-caption-reign">In office: ${escapeHtml(inOffice)}</span>`,
+    }, portraitEl);
+    portraitEl.addEventListener('click', openPortraitLightbox);
+    portraitEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPortraitLightbox(); }
+    });
+  }
+
+  dom.modalBody.querySelectorAll('.rp-predsucc-col[data-pm-id]').forEach(el => {
+    const open = () => fadeSwapModal(() => openPmProfileModal(el.dataset.pmId));
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  });
+
+  dom.modalBody.parentElement.scrollTop = 0;
+  dom.modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.modalPanel.classList.add('is-open');
+  }));
+}
+// Called by the Prime Ministers page's cards (js/subpages.js).
+window.openPmProfileModal = openPmProfileModal;
+
+function setRpTab(tabKey) {
+  rpState.tab = tabKey;
+  rpState.pageStart = 0;
+  rpState.dynastyFilter = null;
+  rpState.lastAllStart = null;
+  dom.rpTabs.querySelectorAll('.rp-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabKey);
+  });
+  renderRulerAvatars();
+}
+
+function setRpSearch(q) {
+  rpState.search = q.trim();
+  rpState.pageStart = 0;
+  if (dom.rpSearchClear) dom.rpSearchClear.hidden = !rpState.search;
+  renderRulerAvatars();
+}
+
+// Recomputes how many avatars actually fit in the row — .rp-avatar has a
+// fluid width (see CSS), so a fixed count would either overflow on a
+// narrow/tablet screen or leave the row looking sparse on a wide one.
+function computeRpPageSize() {
+  const row = dom.rpAvatars;
+  if (!row) return RP_PAGE_SIZE;
+
+  const rowWidth = row.getBoundingClientRect().width;
+  if (!rowWidth) return RP_PAGE_SIZE;
+
+  // The grid is always 2 rows; only the column count adapts to the width.
+  const gap = parseFloat(getComputedStyle(row).columnGap) || 16;
+  const minCardWidth = rowWidth < 600 ? 120 : 150;
+  const cols = Math.max(2, Math.min(8, Math.floor((rowWidth + gap) / (minCardWidth + gap))));
+  row.style.setProperty('--rp-cols', cols);
+  return cols * 2;
+}
+
+function updateRpPageSize() {
+  const next = computeRpPageSize();
+  if (next !== RP_PAGE_SIZE) {
+    RP_PAGE_SIZE = next;
+    renderRulerAvatars();
+  }
+}
+
+function buildRulersPage() {
+  if (rpState.built) return;
+  renderRulerAvatars();
+  updateRpPageSize();
+  rpState.built = true;
+}
+
+function closeMobileNav() {
+  if (!dom.navLinksList) return;
+  dom.navLinksList.classList.remove('is-open');
+  if (dom.navBurger) {
+    dom.navBurger.setAttribute('aria-expanded', 'false');
+    dom.navBurger.classList.remove('is-open');
+  }
+}
+
+function openRulersPage() {
+  // Unhide before building/measuring — the row has zero width while
+  // display:none, which would throw off the first page-size computation.
+  dom.rulersPage.hidden = false;
+  document.body.classList.add('rulers-page-open');
+  buildRulersPage();
+  updateRpPageSize(); // re-measure in case the viewport changed while this was closed
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.rpPanel.classList.add('is-open');
+  }));
+}
+
+function closeRulersPage() {
+  if (dom.rulersPage.hidden) return;
+  closeAllShareMenus();
+  dom.rpPanel.classList.remove('is-open');
+  dom.rpPanel.addEventListener('transitionend', () => {
+    dom.rulersPage.hidden = true;
+    document.body.classList.remove('rulers-page-open');
+  }, { once: true });
+}
+
+/* ─────────────────────────────────────────
+   AT A GLANCE PAGE — content is fully server-rendered (see
+   includes/partials/at-glance.php), so opening/closing here is just the
+   same show/hide choreography as the Rulers & Dynasties page; there's no
+   data to fetch or build.
+───────────────────────────────────────── */
+function openAtGlancePage() {
+  if (!dom.atGlancePage) return;
+  dom.atGlancePage.hidden = false;
+  document.body.classList.add('at-glance-open');
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.agPanel.classList.add('is-open');
+  }));
+}
+
+function closeAtGlancePage() {
+  if (!dom.atGlancePage || dom.atGlancePage.hidden) return;
+  closeAllShareMenus();
+  dom.agPanel.classList.remove('is-open');
+  dom.agPanel.addEventListener('transitionend', () => {
+    dom.atGlancePage.hidden = true;
+    document.body.classList.remove('at-glance-open');
+  }, { once: true });
+}
+
+/* ─────────────────────────────────────────
+   MAP PAGE — "British Expansion Through the Years". Same show/hide
+   choreography as At a Glance; the map itself lives in js/british-map.js,
+   which loads its own data the first time the page opens.
+───────────────────────────────────────── */
+function openMapPage() {
+  if (!dom.mapPage) return;
+  dom.mapPage.hidden = false;
+  document.body.classList.add('map-page-open');
+  window.BritishMap.open();
+  initModalSourceSlider(dom.mapPage);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.cmPanel.classList.add('is-open');
+  }));
+}
+
+function closeMapPage() {
+  if (!dom.mapPage || dom.mapPage.hidden) return;
+  closeAllShareMenus();
+  window.BritishMap.close();
+  dom.cmPanel.classList.remove('is-open');
+  dom.cmPanel.addEventListener('transitionend', () => {
+    // Reopened before the fade-out finished (e.g. Escape, then Back).
+    if (dom.cmPanel.classList.contains('is-open')) return;
+    dom.mapPage.hidden = true;
+    document.body.classList.remove('map-page-open');
+  }, { once: true });
+}
+
+/* ─────────────────────────────────────────
+   SUBPAGES — Prime Ministers (a Rulers & Dynasties subpage) and Noble
+   Houses, full-page overlays built like the Rulers page. Contents are
+   rendered inline by index.php on a direct load and otherwise fetched as
+   ?partial=1 fragments (see includes/houses-view.php, prime-ministers-view.php);
+   js/subpages.js supplies each page's behaviour.
+───────────────────────────────────────── */
+const SUBPAGES = {
+  'prime-ministers': { id: 'pm-page',     path: 'rulers/prime-ministers' },
+  houses:            { id: 'houses-page', path: 'houses' },
+};
+let activeSubpage = null;
+
+function subpageEl(key) { return document.getElementById(SUBPAGES[key].id); }
+
+async function openSubpage(key, path) {
+  const page = subpageEl(key);
+  if (!page) return;
+  const panel = page.querySelector('.rp-panel');
+  closeSubpages(key);
+  activeSubpage = key;
+  page.hidden = false;
+  document.body.classList.add('subpage-open');
+  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add('is-open')));
+
+  if (panel.dataset.loaded !== path) {
+    panel.dataset.loaded = path;
+    try {
+      const res = await fetch(BASE_PATH + '/' + path + '?partial=1', { headers: { Accept: 'text/html' } });
+      const html = await res.text();
+      if (panel.dataset.loaded !== path) return; // superseded by a newer navigation
+      panel.innerHTML = html;
+      page.scrollTop = 0;
+    } catch {
+      delete panel.dataset.loaded;
+      panel.innerHTML = '<p class="rp-section-desc">This page could not be loaded. Please try again.</p>';
+      return;
+    }
+  }
+  if (panel.dataset.inited !== path) {
+    panel.dataset.inited = path;
+    if (window.SubpageInit && window.SubpageInit[key]) window.SubpageInit[key](panel);
+  }
+}
+
+function closeSubpage(key) {
+  const page = subpageEl(key);
+  if (!page || page.hidden) return;
+  const panel = page.querySelector('.rp-panel');
+  panel.classList.remove('is-open');
+  const finish = () => {
+    if (panel.classList.contains('is-open')) return; // reopened in the meantime
+    page.hidden = true;
+    if (Object.keys(SUBPAGES).every(k => subpageEl(k).hidden)) document.body.classList.remove('subpage-open');
+  };
+  panel.addEventListener('transitionend', finish, { once: true });
+  setTimeout(finish, 600);
+  if (activeSubpage === key) activeSubpage = null;
+}
+
+function closeSubpages(except = null) {
+  Object.keys(SUBPAGES).forEach(k => { if (k !== except) closeSubpage(k); });
+}
+
+function subpageOpen() {
+  return Object.keys(SUBPAGES).some(k => { const el = subpageEl(k); return el && !el.hidden; });
+}
+
+// Same-origin links inside the subpages (and the Rulers page's tab switcher)
+// that point at another in-app route navigate without a full reload.
+function isSpaPath(path) {
+  const parts = path.replace(/^\/+|\/+$/g, '').split('/');
+  if (parts.length === 1) return ['timeline', 'rulers', 'houses', 'at-glance', 'map', 'legacy', 'bibliography', 'about'].includes(parts[0]);
+  if (parts.length === 2 && parts[0] === 'houses') return true;
+  if (parts.length === 2 && parts[0] === 'rulers') return parts[1] === 'prime-ministers' || rulerIndexBySlug.has(parts[1]);
+  if (parts.length === 3 && parts[0] === 'rulers' && parts[1] === 'prime-ministers') return true;
+  return false;
+}
+
+function bindSubpageEvents() {
+  document.addEventListener('click', e => {
+    if (e.defaultPrevented) return;
+    const close = e.target.closest('.subpage-close');
+    if (close) {
+      closeSubpages();
+      setActiveNavLink('overview');
+      setLocationPath('/timeline');
+      return;
+    }
+    const link = e.target.closest('.subpage-page a[href], .rulers-subnav a[href]');
+    if (!link || link.target === '_blank' || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const url = new URL(link.href, window.location.href);
+    if (url.origin !== window.location.origin || (url.hash && url.pathname === window.location.pathname)) return;
+    let path = url.pathname;
+    if (BASE_PATH && path.indexOf(BASE_PATH) === 0) path = path.slice(BASE_PATH.length);
+    if (!isSpaPath(path)) return;
+    e.preventDefault();
+    setLocationPath(path);
+    routeFromPath();
+    const scroller = link.closest('.rulers-page');
+    if (scroller) scroller.scrollTop = 0;
+  });
+}
+
+// Swaps which era's detail panel is shown — plain visibility toggle, no
+// animation, since all 8 panels are already in the DOM (server-rendered).
+// Fades the old detail panel out, then swaps it for the new one and fades
+// that in — sequential rather than a true crossfade, since both panels
+// occupy the same grid cell and would otherwise overlap while transitioning.
+function setAgActiveEra(id) {
+  if (!dom.agEraList) return;
+  const items = [...dom.agEraList.querySelectorAll('.ag-era-item')];
+  const activeIdx = items.findIndex(el => el.dataset.eraId === id);
+  items.forEach((el, i) => {
+    const isActive = i === activeIdx;
+    el.classList.toggle('active', isActive);
+    el.setAttribute('aria-selected', String(isActive));
+    el.tabIndex = isActive ? 0 : -1;
+  });
+
+  items[activeIdx]?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+
+  // .ag-detail-footer lives outside .ag-body (see the comment on it in
+  // includes/partials/at-glance.php) so it can bleed to the panel's full
+  // width instead of being confined to .ag-body's grid column — kept in
+  // sync here since it's no longer a descendant of .ag-detail.
+  document.querySelectorAll('.ag-detail-footer').forEach(el => {
+    const isActive = el.dataset.eraId === id;
+    el.classList.toggle('active', isActive);
+    el.hidden = !isActive;
+  });
+
+  const next = document.querySelector(`.ag-detail[data-era-id="${id}"]`);
+  const current = document.querySelector('.ag-detail.active');
+  if (!next || next === current) return;
+
+  const showNext = () => {
+    next.hidden = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => next.classList.add('active')));
+  };
+
+  if (current) {
+    current.classList.remove('active');
+    current.addEventListener('transitionend', () => { current.hidden = true; }, { once: true });
+    showNext();
+  } else {
+    showNext();
+  }
+}
+
+/* ─────────────────────────────────────────
+   NAV MODAL CONTENT
+───────────────────────────────────────── */
+// Bodies live in index.php as always-server-rendered <template>s
+// (includes/partials/legacy.php, bibliography.php, about.php) — a single
+// source of truth shared with the SSR path, instead of a duplicate copy
+// of the same HTML baked into this file.
+const NAV_MODALS = {
+  legacy:       { title: 'Britain’s Living Legacy', tag: '', tplId: 'tpl-legacy' },
+  bibliography: { title: 'Bibliography & Sources', tag: 'BIBLIOGRAPHY', tplId: 'tpl-bibliography' },
+  author:       { title: 'About', tag: 'ABOUT', tplId: 'tpl-about' },
+};
+
+function openNavModal(key) {
+  const content = NAV_MODALS[key];
+  if (!content) return;
+
+  state.modalEvent = null;
+  state.modalRuler = null;
+  state.modalPm = null;
+  dom.modal.classList.remove('rp-profile-modal', 'em-modal', 'map-modal', 'bibliography-modal', 'author-modal', 'legacy-modal');
+  if (key === 'bibliography') dom.modal.classList.add('bibliography-modal');
+  if (key === 'author') dom.modal.classList.add('author-modal');
+  if (key === 'legacy') dom.modal.classList.add('legacy-modal');
+  dom.modalPrevious.hidden = true;
+  dom.modalNext.hidden = true;
+  dom.modalYearTag.textContent  = content.tag || '';
+  dom.modalTitle.textContent    = content.title;
+  const tpl = document.getElementById(content.tplId);
+  dom.modalBody.innerHTML      = tpl ? tpl.innerHTML : '';
+
+  const navMistakeBtn = dom.modalBody.querySelector('.modal-mistake-btn');
+  if (navMistakeBtn) navMistakeBtn.addEventListener('click', openContactModal);
+
+  dom.modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.modalPanel.classList.add('is-open');
+  }));
+}
+
+/* ─────────────────────────────────────────
+   URL PATH ROUTING — /timeline, /timeline/{slug}, /rulers,
+   /rulers/{slug}, /map, /legacy, /bibliography, /about
+
+   Slugs are computed client-side from the same data the server used to
+   compute them (see includes/data.php's slugify/event_slug_map — keep
+   the two in sync), so a link built by PHP always resolves here, and a
+   URL typed by a visitor always resolves to the right ruler/event.
+───────────────────────────────────────── */
+const PATH_TO_NAV_KEY = {
+  timeline:      'overview',
+  rulers:        'rulers-dynasties',
+  houses:        'houses',
+  'at-glance':   'at-glance',
+  map:           'map',
+  legacy:        'legacy',
+  bibliography:  'bibliography',
+  about:         'author',
+};
+const NAV_KEY_TO_PATH = {
+  overview:            'timeline',
+  'rulers-dynasties':  'rulers',
+  houses:              'houses',
+  'at-glance':         'at-glance',
+  map:                 'map',
+  legacy:              'legacy',
+  bibliography:        'bibliography',
+  author:              'about',
+};
+
+// Must produce byte-identical output to PHP's slugify() in includes/data.php.
+const SLUGIFY_MAP = {
+  'á':'a','à':'a','â':'a','ä':'a','ã':'a','å':'a','ą':'a',
+  'é':'e','è':'e','ê':'e','ë':'e','ě':'e','ė':'e','ę':'e',
+  'í':'i','ì':'i','î':'i','ï':'i','į':'i',
+  'ó':'o','ò':'o','ô':'o','ö':'o','õ':'o','ø':'o',
+  'ú':'u','ù':'u','û':'u','ü':'u','ů':'u','ų':'u','ū':'u','ŭ':'u',
+  'ý':'y','ÿ':'y',
+  'ñ':'n','ń':'n',
+  'ç':'c','ć':'c','č':'c',
+  'ł':'l',
+  'ś':'s','š':'s',
+  'ź':'z','ż':'z','ž':'z',
+  'æ':'ae','ß':'ss',
+};
+
+function slugify(text) {
+  const lower = String(text || '').toLowerCase();
+  const translit = lower.replace(/[^\x00-\x7f]/g, ch => SLUGIFY_MAP[ch] || ch);
+  return translit.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+let rulerSlugByIndex = [];
+let rulerIndexBySlug = new Map();
+let eventSlugByKey = new Map();  // `${eraIdx}:${eventIdx}` -> slug
+let eventBySlug = new Map();     // slug -> { era, eventIndex }
+
+// Built once RULERS/state.eras are loaded (called from init()). Mirrors
+// includes/data.php's ruler_slug_map()/event_slug_map() exactly — same
+// disambiguation rule (append reign-start year / -2, -3, ... suffix) in
+// the same encounter order, so both sides always agree on every slug.
+function buildSlugMaps() {
+  const baseR = RULERS.map(r => slugify(r.name));
+  const countsR = new Map();
+  baseR.forEach(s => countsR.set(s, (countsR.get(s) || 0) + 1));
+  rulerSlugByIndex = RULERS.map((r, i) => (countsR.get(baseR[i]) > 1 ? `${baseR[i]}-${r.from}` : baseR[i]));
+  rulerIndexBySlug = new Map(rulerSlugByIndex.map((s, i) => [s, i]));
+
+  const entries = [];
+  state.eras.forEach((era, eraIdx) => {
+    if (era.isIntro) return;
+    era.events.forEach((event, eventIdx) => entries.push({ eraIdx, eventIdx, year: era.year, title: event.title }));
+  });
+  const base = entries.map(e => `${e.year}-${slugify(e.title)}`);
+  const counts = new Map();
+  base.forEach(s => counts.set(s, (counts.get(s) || 0) + 1));
+  const seen = new Map();
+  eventSlugByKey = new Map();
+  eventBySlug = new Map();
+  entries.forEach((e, i) => {
+    let slug = base[i];
+    if (counts.get(slug) > 1) {
+      const n = (seen.get(slug) || 0) + 1;
+      seen.set(slug, n);
+      if (n > 1) slug += '-' + n;
+    }
+    eventSlugByKey.set(`${e.eraIdx}:${e.eventIdx}`, slug);
+    eventBySlug.set(slug, { era: state.eras[e.eraIdx], eventIndex: e.eventIdx });
+  });
+}
+
+function rulerSlug(ruler) {
+  const idx = RULERS.indexOf(ruler);
+  return idx >= 0 ? rulerSlugByIndex[idx] : null;
+}
+
+function eraEventSlug(era, eventIndex) {
+  const eraIdx = state.eras.indexOf(era);
+  return eventSlugByKey.get(`${eraIdx}:${eventIndex}`) || null;
+}
+
+// Set once by index.php from the same base_path() PHP uses for routing —
+// '' at a domain root (production), or e.g. '/gdl-history' when the app is
+// served from a subdirectory (local WAMP). Route paths (leading "/") need
+// this prefix explicitly; plain-relative asset paths don't (handled by the
+// <base href> tag instead).
+const BASE_PATH = window.__BASE_PATH__ || '';
+
+function setLocationPath(path, hash = '') {
+  const full = BASE_PATH + path + (hash ? '#' + hash : '');
+  if (window.location.pathname + window.location.hash === full) return;
+  history.pushState(null, '', full);
+}
+
+// Strips BASE_PATH from the current pathname the same way index.php's
+// router does, so route parsing always sees paths as if mounted at root.
+function currentRoutePath() {
+  let path = window.location.pathname;
+  if (BASE_PATH && path.indexOf(BASE_PATH) === 0) path = path.slice(BASE_PATH.length);
+  return path;
+}
+
+function setActiveNavLink(key) {
+  document.querySelectorAll('.nav-link').forEach(x => x.classList.toggle('active', x.dataset.nav === key));
+}
+
+// Shared by nav-link clicks and path-based routing (direct link, back/forward,
+// typed-in-address-bar) so both paths open the exact same view.
+function activateNavKey(key, { updatePath = true, path = null } = {}) {
+  if (SUBPAGES[key]) {
+    if (!dom.modal.hidden) closeModal();
+    closeRulersPage();
+    closeAtGlancePage();
+    closeMapPage();
+    const loaded = openSubpage(key, path || SUBPAGES[key].path);
+    setActiveNavLink(key === 'prime-ministers' ? 'rulers-dynasties' : key);
+    if (updatePath) setLocationPath('/' + (path || SUBPAGES[key].path));
+    return loaded;
+  }
+  closeSubpages();
+  if (key === 'rulers-dynasties') {
+    if (!dom.modal.hidden) closeModal();
+    closeAtGlancePage();
+    closeMapPage();
+    openRulersPage();
+  } else if (key === 'at-glance') {
+    if (!dom.modal.hidden) closeModal();
+    closeRulersPage();
+    closeMapPage();
+    openAtGlancePage();
+  } else if (key === 'overview') {
+    goToHome();
+  } else if (key === 'map') {
+    if (!dom.modal.hidden) closeModal();
+    closeRulersPage();
+    closeAtGlancePage();
+    openMapPage();
+  } else {
+    closeRulersPage();
+    closeAtGlancePage();
+    closeMapPage();
+    if (NAV_MODALS[key]) openNavModal(key);
+  }
+  setActiveNavLink(key);
+  if (updatePath && NAV_KEY_TO_PATH[key]) setLocationPath('/' + NAV_KEY_TO_PATH[key]);
+}
+
+// Cross-fades the shared modal's content in place — used when swapping
+// between an event and a ruler profile within the same open overlay,
+// instead of closing and reopening it.
+function fadeSwapModal(renderFn) {
+  const content = dom.modalContent;
+  if (!content) { renderFn(); return; }
+
+  content.classList.add('is-swapping');
+  setTimeout(() => {
+    renderFn();
+    requestAnimationFrame(() => content.classList.remove('is-swapping'));
+  }, 80);
+}
+
+// Closes whatever the shared #modal element currently shows, and — only if
+// it was one of the top-level nav destinations (map/legacy/bibliography/
+// about), not an event popup or ruler-profile overlay — resets the hash and
+// nav-link highlight back to the timeline, matching the Timeline nav link.
+function closeModalAndSyncHash() {
+  // An event opened from a ruler profile's "Events During Reign" list closes
+  // back into that ruler's profile, not all the way out to the timeline —
+  // the visitor came from there and likely still wants to read about them.
+  // Same for an event opened from a prime minister's "Events in Office".
+  if (state.modalReturnPm) {
+    const id = state.modalReturnPm;
+    state.modalReturnPm = null;
+    fadeSwapModal(() => openPmProfileModal(id));
+    return;
+  }
+  if (state.modalReturnRuler) {
+    const ruler = state.modalReturnRuler;
+    state.modalReturnRuler = null;
+    fadeSwapModal(() => openRulerProfileModal(ruler));
+    return;
+  }
+  // Mirror image: a ruler profile opened from an event's "Who Was in Power"
+  // card (or a Predecessor/Successor link) closes back into that event.
+  if (state.modalReturnEvent) {
+    const { era, eventIndex, eraIndex } = state.modalReturnEvent;
+    state.modalReturnEvent = null;
+    fadeSwapModal(() => openModal(era, eventIndex, eraIndex));
+    return;
+  }
+  // An event opened from the At a Glance page's Key Events list closes
+  // straight back into it — that page was never actually closed, it's
+  // just been sitting underneath this modal the whole time (same layering
+  // as a ruler profile over the Rulers & Dynasties page), so this only
+  // needs to resync the URL/nav-link, not reopen anything.
+  if (state.modalReturnAtGlance) {
+    state.modalReturnAtGlance = false;
+    closeModal();
+    setActiveNavLink('at-glance');
+    setLocationPath('/at-glance');
+    return;
+  }
+
+  const isNavLevelModal = dom.modal.classList.contains('map-modal')
+    || dom.modal.classList.contains('bibliography-modal')
+    || dom.modal.classList.contains('author-modal')
+    || dom.modal.classList.contains('legacy-modal');
+  const wasPmProfile = Boolean(state.modalPm);
+  const wasRulerProfile = dom.modal.classList.contains('rp-profile-modal');
+  const wasEventModal = dom.modal.classList.contains('em-modal');
+  closeModal();
+  state.modalPm = null;
+  if (wasPmProfile) {
+    // Sits on top of the Prime Ministers page, which stays open underneath.
+    setLocationPath('/rulers/prime-ministers');
+  } else if (isNavLevelModal) {
+    setActiveNavLink('overview');
+    setLocationPath('/timeline');
+  } else if (wasRulerProfile) {
+    // The ruler profile modal sits on top of the Rulers & Dynasties page —
+    // closing it directly (not via a return-to-event link) lands back there.
+    setLocationPath('/rulers');
+  } else if (wasEventModal) {
+    setLocationPath('/timeline');
+  }
+}
+
+// Resolves the current URL to a view. Used both at boot (hydrating
+// whatever main.js loaded on top of) and on popstate (back/forward) — in
+// both cases the browser has already applied the URL, so this never itself
+// pushes a new history entry (activateNavKey is always called with
+// updatePath: false here).
+function routeFromPath() {
+  const path = currentRoutePath().replace(/\/+$/, '') || '/';
+  const parts = path === '/' ? [] : path.slice(1).split('/');
+
+  if (parts.length === 2 && parts[0] === 'timeline') {
+    const target = eventBySlug.get(parts[1]);
+    if (target) {
+      setActiveNavLink('overview');
+      openModal(target.era, target.eventIndex);
+      return;
+    }
+  }
+  if (parts.length === 2 && parts[0] === 'rulers' && parts[1] === 'prime-ministers') {
+    activateNavKey('prime-ministers', { updatePath: false });
+    return;
+  }
+  // /rulers/prime-ministers/{id}: the page, then that prime minister's profile.
+  if (parts.length === 3 && parts[0] === 'rulers' && parts[1] === 'prime-ministers') {
+    activateNavKey('prime-ministers', { updatePath: false }).then(() => {
+      if (pmById(parts[2])) openPmProfileModal(parts[2]);
+      else setLocationPath('/rulers/prime-ministers');
+    });
+    return;
+  }
+  if (parts.length === 2 && parts[0] === 'houses') {
+    activateNavKey('houses', { updatePath: false, path: 'houses/' + parts[1] });
+    return;
+  }
+  if (parts.length === 2 && parts[0] === 'rulers') {
+    const idx = rulerIndexBySlug.get(parts[1]);
+    if (idx != null) {
+      // Captured before openRulerProfileModal runs — it syncs the URL to a
+      // bare /rulers/{slug} itself, which would otherwise clear this hash
+      // before we get a chance to read it.
+      const wantsFamilyTree = window.location.hash === '#family-tree';
+      closeSubpages();
+      openRulersPage();
+      setActiveNavLink('rulers-dynasties');
+      openRulerProfileModal(RULERS[idx]);
+      if (wantsFamilyTree) openFamilyTreeLightbox(RULERS[idx]);
+      return;
+    }
+  }
+
+  const key = parts.length === 0 ? 'overview' : (parts.length === 1 ? PATH_TO_NAV_KEY[parts[0]] : null);
+  if (key) activateNavKey(key, { updatePath: false });
+
+  // /rulers#<dynasty-slug> (as set by "View Full Dynasty" — see
+  // viewFullDynasty) — pre-filters the page to that dynasty on direct load
+  // or back/forward, same as clicking its legend entry would.
+  if (key === 'rulers-dynasties' && window.location.hash) {
+    const dynastyId = dynastyIdFromSlug(window.location.hash.slice(1));
+    if (dynastyId) {
+      setRpTab('all');
+      setRpDynastyFilter(dynastyId);
+    }
+  }
+}
+
+/* ─────────────────────────────────────────
+   MAP MODAL — interactive territory timeline
+   Every 25 years from 950, the map crossfades to the
+   latest TIMELINE_MAPS entry whose year has been reached
+   (see nearestMapEntry), alongside the ruler in power and
+   the nearest recorded event for that year.
+───────────────────────────────────────── */
+const MAP_NAV_ICON_PREV = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const MAP_NAV_ICON_NEXT = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+let mapCurrentFile = null; // last-painted image src, so setMapYear can skip a no-op crossfade
+let mapLayerActive = 'a';
+
+// One tick per MAP_STEP years, spanning from MAP_START to just past the
+// newest available map — a fixed grid rather than one tick per image, since
+// the source maps land on irregular years.
+function getMapStepYears() {
+  return TIMELINE_MAPS.map(entry => entry.year);
+}
+
+// Latest map whose year has already been reached — never a map dated
+// later than `year`, so the 1929 United Kingdom map only appears once the
+// active year reaches 1929.
+function nearestMapEntry(year) {
+  if (!TIMELINE_MAPS.length) return null;
+  return TIMELINE_MAPS.reduce((best, entry) => {
+    if (entry.year > year) return best;
+    if (!best || entry.year > best.year) return entry;
+    return best;
+  }, null);
+}
+
+// Nearest recorded eras to a given year — used for the "What happened
+// around" list. Same proximity search as getWorldEventsForYear, since map
+// steps (every 25 years) rarely land on an exact event year: take the
+// closest few by distance, then re-order them chronologically for display.
+function nearestErasForYear(year, count = 3, maxDistance = 60) {
+  const eras = state.eras.filter(e => !e.isIntro && e.year != null);
+  if (!eras.length) return [];
+  return eras
+    .map(e => ({ e, dist: Math.abs(e.year - year) }))
+    .filter(x => x.dist <= maxDistance)
+    .sort((a, b) => a.dist - b.dist || a.e.year - b.e.year)
+    .slice(0, count)
+    .map(x => x.e)
+    .sort((a, b) => a.year - b.year);
+}
+
+function openMapModal() {
+  if (!TIMELINE_MAPS.length) return;
+
+  state.modalEvent = null;
+  state.modalRuler = null;
+  state.modalPm = null;
+  dom.modal.classList.remove('rp-profile-modal', 'em-modal', 'bibliography-modal', 'author-modal', 'legacy-modal');
+  dom.modal.classList.add('map-modal');
+  dom.modalPrevious.hidden = true;
+  dom.modalNext.hidden = true;
+  dom.modalYearTag.textContent = '';
+  dom.modalTitle.textContent = 'Territory & Geography';
+
+  const steps = getMapStepYears();
+
+  dom.modalBody.innerHTML = `
+    <div class="map-modal-layout">
+      <div class="map-main-col">
+        <div class="map-stage">
+          <div class="map-stage-layer map-stage-layer--a"></div>
+          <div class="map-stage-layer map-stage-layer--b"></div>
+          <span class="map-year-badge"></span>
+          <div class="map-hint" id="map-hint">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2v9M4 7.5L8 11.5L12 7.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Click the dates below the map</span>
+          </div>
+        </div>
+        <div class="map-timeline" aria-label="Map year timeline">
+          <button type="button" class="map-tl-arrow map-tl-prev" aria-label="Earlier">${MAP_NAV_ICON_PREV}</button>
+          <div class="map-tl-track">
+            <div class="map-tl-inner">
+              ${steps.map(y => `<button type="button" class="map-tl-tick" data-year="${y}">${y}</button>`).join('')}
+            </div>
+          </div>
+          <button type="button" class="map-tl-arrow map-tl-next" aria-label="Later">${MAP_NAV_ICON_NEXT}</button>
+        </div>
+      </div>
+      <div class="map-side-col">
+        <div class="map-info-col map-info-event"></div>
+        <div class="map-info-col map-info-power"></div>
+      </div>
+    </div>
+    <div class="modal-source">
+      <button type="button" class="modal-mistake-btn">
+        <svg class="modal-mistake-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="8" y1="4.8" x2="8" y2="8.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
+        Noticed a mistake or have suggestions?
+      </button>
+    </div>`;
+
+  const mapHint = dom.modalBody.querySelector('#map-hint');
+  const hideMapHint = () => { if (mapHint) mapHint.classList.add('is-hidden'); };
+
+  const track = dom.modalBody.querySelector('.map-tl-track');
+  track.querySelectorAll('.map-tl-tick').forEach(btn => {
+    btn.addEventListener('click', () => { setMapYear(Number(btn.dataset.year), true); hideMapHint(); });
+  });
+  dom.modalBody.querySelector('.map-tl-prev').addEventListener('click', () => { stepMapYear(-1); hideMapHint(); });
+  dom.modalBody.querySelector('.map-tl-next').addEventListener('click', () => { stepMapYear(1); hideMapHint(); });
+
+  const mapMistakeBtn = dom.modalBody.querySelector('.modal-mistake-btn');
+  if (mapMistakeBtn) mapMistakeBtn.addEventListener('click', openContactModal);
+
+  mapCurrentFile = null;
+  const initialYear = steps.length
+    ? steps.reduce((best, y) => Math.abs(y - (state.mapYear ?? 1400)) < Math.abs(best - (state.mapYear ?? 1400)) ? y : best)
+    : (TIMELINE_MAPS[0]?.year ?? 600);
+  setMapYear(initialYear, false);
+
+  dom.modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.modalPanel.classList.add('is-open');
+  }));
+}
+
+function stepMapYear(direction) {
+  const steps = getMapStepYears();
+  if (!steps.length) return;
+  const idx = steps.indexOf(state.mapYear);
+  const nextIdx = idx === -1 ? 0 : Math.max(0, Math.min(steps.length - 1, idx + direction));
+  setMapYear(steps[nextIdx], true);
+}
+
+function setMapYear(year, animate) {
+  const steps = getMapStepYears();
+  if (steps.length) year = Math.max(steps[0], Math.min(steps[steps.length - 1], year));
+  state.mapYear = year;
+
+  const entry = nearestMapEntry(year);
+  if (entry && entry.file !== mapCurrentFile) {
+    mapCurrentFile = entry.file;
+    const layerIn  = mapLayerActive === 'a' ? dom.modalBody.querySelector('.map-stage-layer--a') : dom.modalBody.querySelector('.map-stage-layer--b');
+    const layerOut = mapLayerActive === 'a' ? dom.modalBody.querySelector('.map-stage-layer--b') : dom.modalBody.querySelector('.map-stage-layer--a');
+    if (layerIn) {
+      layerIn.style.backgroundImage = `url('${entry.file}')`;
+      if (animate) {
+        layerIn.classList.remove('active', 'fadeout');
+        layerIn.classList.add('active');
+        if (layerOut) { layerOut.classList.remove('active'); layerOut.classList.add('fadeout'); }
+      } else {
+        layerIn.classList.remove('fadeout');
+        layerIn.classList.add('active');
+        if (layerOut) layerOut.classList.remove('active', 'fadeout');
+      }
+      mapLayerActive = mapLayerActive === 'a' ? 'b' : 'a';
+    }
+  }
+
+  const badge = dom.modalBody.querySelector('.map-year-badge');
+  if (badge) badge.textContent = entry?.label ? `${year} · ${entry.label}` : year;
+
+  const eventCol = dom.modalBody.querySelector('.map-info-event');
+  if (eventCol) {
+    const eras = nearestErasForYear(year);
+    eventCol.innerHTML = eras.length ? `
+      <div class="map-info-heading"><span>What happened around ${year}</span></div>
+      <div class="em-world-list">
+        ${eras.map(era => {
+          const event = era.events[0];
+          return `
+          <div class="em-world-item">
+            <span class="em-world-year">${era.year}</span>
+            <div class="em-world-text">
+              <span class="em-world-title">${escapeHtml(event.title)}</span>
+              <span class="em-world-desc">${escapeHtml(event.text || '')}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    ` : '';
+  }
+
+  const powerCol = dom.modalBody.querySelector('.map-info-power');
+  if (powerCol) {
+    powerCol.innerHTML = emWhoIsInPowerHtml(year);
+    powerCol.querySelectorAll('.em-power-card[data-ruler-idx]').forEach(el => {
+      const open = () => {
+        const ruler = RULERS[Number(el.dataset.rulerIdx)];
+        if (ruler) openRulerProfileModal(ruler);
+      };
+      el.addEventListener('click', open);
+      el.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      });
+    });
+  }
+
+  const track = dom.modalBody.querySelector('.map-tl-track');
+  const inner = dom.modalBody.querySelector('.map-tl-inner');
+  if (track && inner) {
+    let activeBtn = null;
+    inner.querySelectorAll('.map-tl-tick').forEach(btn => {
+      const isActive = Number(btn.dataset.year) === year;
+      btn.classList.toggle('active', isActive);
+      if (isActive) activeBtn = btn;
+    });
+    if (activeBtn) {
+      requestAnimationFrame(() => {
+        const trackW = track.offsetWidth;
+        const shift  = trackW / 2 - activeBtn.offsetLeft - activeBtn.offsetWidth / 2;
+        inner.style.transform = `translateX(${shift}px)`;
+      });
+    }
+  }
+}
+
+/* ─────────────────────────────────────────
+   MODAL
+───────────────────────────────────────── */
+const EM_ICON_BOOK = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H11v18H5.5A1.5 1.5 0 0 1 4 19.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M20 4.5A1.5 1.5 0 0 0 18.5 3H13v18h5.5a1.5 1.5 0 0 0 1.5-1.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+
+// Nearest world events (by absolute year distance) used in the "Meanwhile
+// in Europe and the world" sidebar — deliberately a proximity search rather
+// than a strict range, since sparse coverage means an exact-year match is
+// rare, but the closest handful of entries are still useful context.
+function getWorldEventsForYear(year, count = 4, maxDistance = 60) {
+  if (!Array.isArray(WORLD_EVENTS) || !WORLD_EVENTS.length || year == null) return [];
+  return WORLD_EVENTS
+    .map(e => ({ ...e, dist: Math.abs(e.year - year) }))
+    .filter(e => e.dist <= maxDistance)
+    .sort((a, b) => a.dist - b.dist || a.year - b.year)
+    .slice(0, count)
+    .sort((a, b) => a.year - b.year);
+}
+
+// "Who was in power" block for the event modal — just the ruler active in
+// that exact year, reusing the same RULERS lookup as the ruler-profile
+// modal so the two stay in sync without duplicating data.
+function emWhoIsInPowerHtml(year) {
+  const ruler = getRuler(year);
+  if (!ruler) return '';
+
+  return `
+    <div class="em-power">
+      <div class="em-power-heading"><span>Who was in power?</span></div>
+      <div class="em-power-card" data-ruler-idx="${RULERS.indexOf(ruler)}" role="button" tabindex="0" aria-label="View ${escapeHtml(ruler.name)}'s full profile">
+        <span class="em-power-portrait">${ruler.image
+          ? `<img src="${escapeHtml(ruler.image)}" alt="" loading="lazy">`
+          : `<img src="img/favicon/coat-of-arms.svg" alt="" loading="lazy">`}</span>
+        <span class="em-power-info">
+          <span class="em-power-name">${escapeHtml(ruler.name)}</span>
+          <span class="em-power-title">${escapeHtml(ruler.title)}</span>
+          <span class="em-power-reign">${escapeHtml(ruler.reign)}</span>
+        </span>
+      </div>
+    </div>`;
+}
+
+// "Meanwhile in Europe and the world" sidebar — a vertical timeline of the
+// closest entries in data/world-events.json to the event's year. Purely
+// supplementary context, so it's marked data-nosnippet and kept out of
+// matchesSearch/eventMatchesSearch — it should never surface as, or be
+// mistaken for, a site search result.
+function emWorldEventsHtml(year) {
+  const items = getWorldEventsForYear(year);
+  if (!items.length) return '';
+  return `
+    <div class="em-world" data-nosnippet>
+      <div class="em-world-heading"><span>Meanwhile in Europe</span></div>
+      <div class="em-world-list">
+        ${items.map(e => `
+          <div class="em-world-item">
+            <span class="em-world-year">${e.year}</span>
+            <div class="em-world-text">
+              <span class="em-world-title">${escapeHtml(e.title)}</span>
+              <span class="em-world-desc">${escapeHtml(e.text)}</span>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function initModalSourceSlider(root = document) {
+  const viewport = root.querySelector('.modal-source-slider');
+  const next = root.querySelector('.modal-source-next');
+  const prev = root.querySelector('.modal-source-prev');
+  if (!viewport || !next) return;
+  if (viewport.dataset.sliderReady === 'true') return;
+  viewport.dataset.sliderReady = 'true';
+
+  const update = () => {
+    const overflow = viewport.scrollWidth > viewport.clientWidth + 2;
+    const atStart = viewport.scrollLeft <= 2;
+    const atEnd = viewport.scrollLeft + viewport.clientWidth >= viewport.scrollWidth - 2;
+    next.hidden = !overflow;
+    next.disabled = overflow && atEnd;
+    next.setAttribute('aria-label', atEnd ? 'All sources shown' : 'Show more sources');
+    if (prev) {
+      prev.hidden = !overflow;
+      prev.disabled = overflow && atStart;
+    }
+  };
+
+  next.addEventListener('click', () => {
+    viewport.scrollBy({ left: Math.max(180, viewport.clientWidth * 0.75), behavior: 'smooth' });
+  });
+  if (prev) {
+    prev.addEventListener('click', () => {
+      viewport.scrollBy({ left: -Math.max(180, viewport.clientWidth * 0.75), behavior: 'smooth' });
+    });
+  }
+  viewport.addEventListener('scroll', update, { passive: true });
+  if ('ResizeObserver' in window) new ResizeObserver(update).observe(viewport);
+  requestAnimationFrame(update);
+}
+
+function openModal(era, eventIndex, eraIndex = state.activeEra) {
+  const event = era.events[eventIndex];
+  if (!event) return;
+
+  // Every path that opens an event (timeline click, pagination arrows,
+  // "who was in power" cross-link, direct URL) funnels through here, so
+  // updating the URL in this one place gives every one of them a real,
+  // shareable /timeline/{slug} address for free.
+  const slug = eraEventSlug(era, eventIndex);
+  if (slug) setLocationPath('/timeline/' + slug);
+
+  const ordered = getOrderedEras();
+  const resolvedEraIndex = ordered[eraIndex] === era ? eraIndex : ordered.indexOf(era);
+  state.modalEvent = resolvedEraIndex >= 0 ? { eraIndex: resolvedEraIndex, eventIndex } : null;
+  state.modalRuler = null;
+  state.modalPm = null;
+  state.modalReturnEvent = null;
+  dom.modal.classList.remove('rp-profile-modal', 'map-modal', 'bibliography-modal', 'author-modal', 'legacy-modal');
+  dom.modal.classList.add('em-modal');
+  updateModalNavigation();
+
+  dom.modalYearTag.textContent = era.year;
+
+  // Same battle/ruler-change/main-event glyphs as the timeline list's
+  // .tl-cat-icon (CATEGORY_ICONS/CATEGORY_ICON_ORDER above), but for this
+  // specific event rather than aggregated across the whole era, shown as
+  // an inline superscript badge right after the sticky title text.
+  const eventCategories = CATEGORY_ICON_ORDER.filter(cat => getEventCategories(event, era).includes(cat));
+  const categoryIconsHtml = eventCategories.length ? `
+    <span class="em-event-cats" aria-hidden="true">
+      ${eventCategories.map(cat => `<span class="em-event-cat-icon em-event-cat-icon--${cat}">${CATEGORY_ICONS[cat]}</span>`).join('')}
+    </span>` : '';
+  dom.modalTitle.innerHTML = escapeHtml(event.title) + categoryIconsHtml;
+
+  const raw = event.detail || event.text || '';
+  const paragraphs = raw
+    .split('\n\n')
+    .filter(p => p.trim())
+    .map(p => `<p>${escapeHtml(p.trim())}</p>`)
+    .join('') || `<p>${escapeHtml(raw)}</p>`;
+  const whyItMatters = event.whyItMatters ? `
+    <section class="em-why" aria-labelledby="em-why-heading">
+      <h3 id="em-why-heading">Why it matters</h3>
+      <p>${escapeHtml(event.whyItMatters)}</p>
+    </section>` : '';
+
+  const images = normaliseEventImages(event);
+  const gallery = images.length ? `
+    <div class="modal-gallery" aria-label="Event images">
+      ${images.map((image, index) => `
+        <button class="modal-gallery-item" type="button" data-gallery-index="${index}" aria-label="Expand ${escapeHtml(image.alt)}">
+          <img src="${escapeHtml(image.src)}" alt="${escapeHtml(image.alt)}" loading="lazy">
+          <span class="modal-gallery-zoom" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+        </button>
+        ${image.caption ? `<span class="modal-gallery-caption">${escapeHtml(image.caption)}</span>` : ''}`).join('')}
+    </div>` : '';
+
+  const sources = getEventSources(event);
+  const sourceLink = sources.length ? `
+    <div class="modal-source">
+      <div class="modal-source-links">
+        <span class="modal-source-label"><span class="em-source-icon">${EM_ICON_BOOK}</span>Sources &amp; further reading</span>
+        <div class="modal-source-slider">
+          <div class="modal-source-list">
+            ${sources.map(s => `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.label)} <span aria-hidden="true">&#8599;</span></a>`).join('<span class="modal-source-sep" aria-hidden="true">&bull;</span>')}
+          </div>
+        </div>
+      </div>
+      <button type="button" class="modal-source-prev" aria-label="Show earlier sources" hidden>
+        <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M13 4l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button type="button" class="modal-source-next" aria-label="Show more sources" hidden>
+        <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button type="button" class="modal-mistake-btn">
+        <svg class="modal-mistake-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="8" y1="4.8" x2="8" y2="8.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
+        Noticed a mistake or have suggestions?
+      </button>
+    </div>` : '';
+
+  const eventNav = era.events.length > 1 ? `
+    <div class="event-nav" aria-label="Event navigation">
+      <button type="button" class="ev-arrow em-event-nav-prev" aria-label="Previous event" ${eventIndex === 0 ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </button>
+      <span class="pagination-display" aria-label="Event ${eventIndex + 1} of ${era.events.length}">${eventIndex + 1} OF ${era.events.length}</span>
+      <button type="button" class="ev-arrow em-event-nav-next" aria-label="Next event" ${eventIndex === era.events.length - 1 ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </button>
+    </div>` : '';
+
+  dom.modalBody.innerHTML = `
+    <div class="em-grid">
+      <div class="em-col em-col-text">
+        <div class="em-year-row">
+          <span class="modal-year-tag">${era.year}</span>
+          ${eventNav}
+        </div>
+        <div class="modal-divider" aria-hidden="true"></div>
+        <div class="modal-copy">${paragraphs}${whyItMatters}</div>
+        ${emWhoIsInPowerHtml(era.year)}
+      </div>
+      <div class="em-col em-col-media">
+        ${gallery}
+        ${emMapCardHtml(era.year)}
+      </div>
+      <div class="em-col em-col-world">
+        ${emWorldEventsHtml(era.year)}
+      </div>
+    </div>
+    ${sourceLink}`;
+  dom.modalBody.querySelectorAll('.modal-gallery-item').forEach(button => {
+    button.addEventListener('click', () => openImageLightbox(images[Number(button.dataset.galleryIndex)], button));
+  });
+  const emNavPrev = dom.modalBody.querySelector('.em-event-nav-prev');
+  const emNavNext = dom.modalBody.querySelector('.em-event-nav-next');
+  if (emNavPrev) emNavPrev.addEventListener('click', () => navigateModalEvent(-1));
+  if (emNavNext) emNavNext.addEventListener('click', () => navigateModalEvent(1));
+  initEmMapCard(dom.modalBody);
+  const mistakeBtn = dom.modalBody.querySelector('.modal-mistake-btn');
+  if (mistakeBtn) mistakeBtn.addEventListener('click', openContactModal);
+  initModalSourceSlider(dom.modalBody);
+  dom.modalBody.querySelectorAll('.em-power-card[data-ruler-idx]').forEach(el => {
+    const open = () => {
+      const ruler = RULERS[Number(el.dataset.rulerIdx)];
+      if (!ruler) return;
+      // Opening from here should fade the ruler profile in over this event
+      // modal and, on close, fade back into this same event rather than
+      // dropping all the way back to the timeline.
+      state.modalReturnEvent = { era, eventIndex, eraIndex: resolvedEraIndex };
+      fadeSwapModal(() => openRulerProfileModal(ruler));
+    };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  });
+  dom.modalBody.parentElement.scrollTop = 0;
+
+  dom.modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.modalPanel.classList.add('is-open');
+  }));
+}
+
+/* "Great Britain in YEAR" card under the event images: a thumbnail drawn by
+   BritishMap.renderThumb; clicking it opens the Map page, embedded
+   (?embed=1 — map and year controls only, no chapter panel), at the
+   event's year in the map viewer popup. Left out for years before the
+   map starts (AD 43); the thumbnail fills in once the map data arrives. */
+const EM_ICON_GLOBE = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.5 3.9 5.5 3.9 9s-1.3 6.5-3.9 9c-2.6-2.5-3.9-5.5-3.9-9S9.4 5.5 12 3z"/></svg>';
+const EM_ICON_EXPAND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>';
+const MAP_FIRST_YEAR = 43;
+
+function emMapCardHtml(year) {
+  if (year == null || year < MAP_FIRST_YEAR || !window.BritishMap || !dom.mapViewer) return '';
+  const y = Math.round(year);
+  return `
+    <button type="button" class="em-map-card" data-year="${y}" aria-label="Great Britain in ${y}: view on world map">
+      <span class="em-map-inner">
+        <span class="em-map-thumb"><svg preserveAspectRatio="xMinYMid slice" aria-hidden="true"></svg></span>
+        <span class="em-map-text">
+          <span class="em-map-title">Great Britain in ${y}</span>
+          <span class="em-map-link">${EM_ICON_GLOBE}<span>View on world map</span><svg class="em-map-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span>
+        </span>
+        <span class="em-map-expand" aria-hidden="true">${EM_ICON_EXPAND}</span>
+      </span>
+    </button>`;
+}
+
+function initEmMapCard(root) {
+  const card = root.querySelector('.em-map-card');
+  if (!card) return;
+  const year = Number(card.dataset.year);
+  const thumb = card.querySelector('.em-map-thumb');
+  window.BritishMap.renderThumb(thumb.querySelector('svg'), year)
+    .then(ok => { if (ok) thumb.classList.add('is-ready'); else card.remove(); })
+    .catch(() => {});
+  card.addEventListener('click', () => openMapViewer(year));
+}
+
+function openMapViewer(year) {
+  dom.mapViewerTitle.textContent = `Great Britain in ${year}`;
+  dom.mapViewerFrame.src = `${BASE_PATH}/map?embed=1#year=${year}`;
+  dom.mapViewer.hidden = false;
+  // Force a reflow so the fade/scale-in starts from the closed state.
+  void dom.mapViewer.offsetWidth;
+  dom.mapViewer.classList.add('is-open');
+  // Keyboard shortcuts (chapters, play, Escape) go straight to the map.
+  dom.mapViewerFrame.addEventListener('load', () => dom.mapViewerFrame.focus(), { once: true });
+}
+
+function closeMapViewer() {
+  if (!dom.mapViewer || dom.mapViewer.hidden) return;
+  dom.mapViewer.classList.remove('is-open');
+  dom.mapViewer.hidden = true;
+  dom.mapViewerFrame.src = 'about:blank';
+  const card = dom.modalBody.querySelector('.em-map-card');
+  if (card) card.focus();
+}
+// Escape inside the framed map closes the viewer (see the keydown handler).
+window.closeMapViewer = closeMapViewer;
+
+function getAdjacentModalEvent(direction) {
+  if (!state.modalEvent) return null;
+
+  const ordered = getOrderedEras();
+  let { eraIndex, eventIndex } = state.modalEvent;
+  eventIndex += direction;
+
+  if (direction < 0 && eventIndex < 0) {
+    eraIndex -= 1;
+    if (eraIndex < 0) return null;
+    eventIndex = ordered[eraIndex].events.length - 1;
+  } else if (direction > 0 && eventIndex >= ordered[eraIndex].events.length) {
+    eraIndex += 1;
+    if (eraIndex >= ordered.length) return null;
+    eventIndex = 0;
+  }
+
+  const era = ordered[eraIndex];
+  const event = era && era.events[eventIndex];
+  return event ? { eraIndex, eventIndex, era, event } : null;
+}
+
+function updateModalNavigation() {
+  if (state.modalPm) {
+    const prev = getAdjacentPm(state.modalPm, -1);
+    const next = getAdjacentPm(state.modalPm, 1);
+    dom.modalPrevious.hidden = false;
+    dom.modalNext.hidden = false;
+    dom.modalPrevious.disabled = !prev;
+    dom.modalNext.disabled = !next;
+    dom.modalPrevious.setAttribute('aria-label', prev ? `Previous prime minister: ${prev.name}` : 'No previous prime minister');
+    dom.modalNext.setAttribute('aria-label', next ? `Next prime minister: ${next.name}` : 'No next prime minister');
+    return;
+  }
+  if (state.modalRuler) {
+    const prev = getAdjacentRuler(state.modalRuler, -1);
+    const next = getAdjacentRuler(state.modalRuler, 1);
+  // Exclude period entries from individual ruler navigation.
+  const usablePrev = prev && prev.reignLabel === 'Period' ? null : prev;
+
+    dom.modalPrevious.hidden = false;
+    dom.modalNext.hidden = false;
+    dom.modalPrevious.disabled = !usablePrev;
+    dom.modalNext.disabled = !next;
+    dom.modalPrevious.setAttribute('aria-label', usablePrev ? `Previous ruler: ${usablePrev.name}` : 'No previous ruler');
+    dom.modalNext.setAttribute('aria-label', next ? `Next ruler: ${next.name}` : 'No next ruler');
+    return;
+  }
+
+  const previous = getAdjacentModalEvent(-1);
+  const next = getAdjacentModalEvent(1);
+  const isEventModal = Boolean(state.modalEvent);
+
+  dom.modalPrevious.hidden = !isEventModal;
+  dom.modalNext.hidden = !isEventModal;
+  dom.modalPrevious.disabled = !previous;
+  dom.modalNext.disabled = !next;
+  dom.modalPrevious.setAttribute('aria-label', previous ? `Previous event: ${previous.event.title}` : 'No previous event');
+  dom.modalNext.setAttribute('aria-label', next ? `Next event: ${next.event.title}` : 'No next event');
+}
+
+// Shared by the modal's prev/next arrow buttons and arrow keys — dispatches
+// to whichever navigation mode the open modal is in.
+function navigateModal(direction) {
+  if (state.modalPm) {
+    const target = getAdjacentPm(state.modalPm, direction);
+    if (target) fadeSwapModal(() => openPmProfileModal(target.id));
+    return;
+  }
+  if (state.modalRuler) { navigateModalRuler(direction); return; }
+  navigateModalEvent(direction);
+}
+
+function navigateModalRuler(direction) {
+  const target = getAdjacentRuler(state.modalRuler, direction);
+  if (!target || target.reignLabel === 'Period') return;
+  fadeSwapModal(() => openRulerProfileModal(target));
+}
+
+function navigateModalEvent(direction) {
+  const target = getAdjacentModalEvent(direction);
+  if (!target) return;
+
+  fadeSwapModal(() => {
+    if (target.eraIndex !== state.activeEra) {
+      activateEra(target.eraIndex, false);
+    }
+    state.activeEvent = target.eventIndex;
+    updateContent(target.era, target.eventIndex, false);
+    updateEventVisual(target.era, target.eventIndex, false);
+    openModal(target.era, target.eventIndex, target.eraIndex);
+  });
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function normaliseEventImages(event) {
+  const configured = Array.isArray(event.images) && event.images.length
+    ? event.images
+    : (event.image ? [{ src: event.image }] : []);
+
+  return configured.map((image, index) => {
+    const item = typeof image === 'string' ? { src: image } : image;
+    const credit = item.attribution || event.imageAttribution || {};
+    return {
+      src: item.src || item.url || '',
+      alt: item.alt || `${event.title} historical image ${index + 1}`,
+      caption: item.caption || credit.title || '',
+    };
+  }).filter(image => image.src);
+}
+
+function getEventSources(event) {
+  const list = [];
+  const seen = new Set();
+
+  const push = (url, label) => {
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    list.push({ url, label: label || new URL(url, window.location.href).hostname.replace(/^www\./, '') });
+  };
+
+  if (Array.isArray(event.sources) && event.sources.length) {
+    for (const s of event.sources) {
+      if (typeof s === 'string') push(s, null);
+      else push(s.url || s.href, s.label || s.title || null);
+    }
+  } else if (event.source || event.sourceUrl) {
+    const s = event.source || event.sourceUrl;
+    if (typeof s === 'string') push(s, null);
+    else push(s.url || s.href, s.label || s.title || null);
+  }
+
+  const attribution = event.imageAttribution || {};
+  if (attribution.articleUrl) push(attribution.articleUrl, 'Wikipedia');
+
+  if (list.length === 0) {
+    push(
+      `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(event.title)}`,
+      'Wikipedia (search)'
+    );
+  }
+
+  return list;
+}
+
+function getSourceHost(url) {
+  try {
+    return new URL(url, window.location.href).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+// Computes a transform-origin (relative to panelEl's own box) that lines up
+// with triggerEl's centre, so a lightbox/modal visibly zooms in from
+// whatever button/title opened it, rather than just growing from its own
+// centre. panelEl's transform is neutralised for the instant of measuring —
+// getBoundingClientRect reflects whatever transform is *currently* applied,
+// and a box already scaled down around its default (centre) origin has
+// edges that no longer line up with its true, unscaled position.
+function transformOriginFromTrigger(panelEl, triggerEl) {
+  const prevTransform = panelEl.style.transform;
+  panelEl.style.transform = 'none';
+  const panelRect = panelEl.getBoundingClientRect();
+  panelEl.style.transform = prevTransform;
+
+  const btnRect = triggerEl.getBoundingClientRect();
+  const originX = btnRect.left + btnRect.width / 2 - panelRect.left;
+  const originY = btnRect.top + btnRect.height / 2 - panelRect.top;
+  return `${originX}px ${originY}px`;
+}
+
+// triggerEl (the portrait or gallery thumbnail that was clicked) makes the
+// lightbox zoom in from that element instead of its own centre — same
+// zoom-from-trigger feel as the family tree lightbox below.
+function openImageLightbox(image, triggerEl) {
+  if (!image) return;
+  dom.lightboxImg.src = image.src;
+  dom.lightboxImg.alt = image.alt;
+  if (image.captionHtml) {
+    dom.lightboxCaption.innerHTML = image.captionHtml;
+  } else {
+    dom.lightboxCaption.textContent = image.caption || '';
+  }
+  dom.lightboxCaption.hidden = !(image.captionHtml || image.caption);
+  dom.imageLightbox.hidden = false;
+
+  dom.lightboxFigure.style.transformOrigin = triggerEl
+    ? transformOriginFromTrigger(dom.lightboxFigure, triggerEl)
+    : '';
+
+  requestAnimationFrame(() => dom.imageLightbox.classList.add('is-open'));
+}
+
+function closeImageLightbox() {
+  dom.imageLightbox.classList.remove('is-open');
+  dom.imageLightbox.hidden = true;
+  dom.lightboxImg.src = '';
+}
+
+// The full family tree is too tall to sit permanently inside the ruler
+// modal's media column, so the compact summary card's "View full family
+// tree" button opens it here instead — a smaller, contained popup (not a
+// full-screen takeover) layered above the ruler modal.
+function openFamilyTreeLightbox(ruler, triggerEl) {
+  dom.familyTreeLightboxBody.innerHTML = rpFamilyHtml(ruler);
+  dom.familyTreeLightbox.hidden = false;
+
+  dom.familyTreeLightboxPanel.style.transformOrigin = triggerEl
+    ? transformOriginFromTrigger(dom.familyTreeLightboxPanel, triggerEl)
+    : '';
+
+  requestAnimationFrame(() => dom.familyTreeLightbox.classList.add('is-open'));
+
+  const slug = rulerSlug(ruler);
+  if (slug) setLocationPath('/rulers/' + slug, 'family-tree');
+}
+
+function closeFamilyTreeLightbox() {
+  dom.familyTreeLightbox.classList.remove('is-open');
+  dom.familyTreeLightbox.hidden = true;
+  dom.familyTreeLightboxBody.innerHTML = '';
+
+  if (state.modalRuler) {
+    const slug = rulerSlug(state.modalRuler);
+    if (slug) setLocationPath('/rulers/' + slug);
+  }
+}
+
+function closeModal() {
+  state.modalEvent = null;
+  closeAllShareMenus();
+  dom.modalPanel.classList.remove('is-open');
+
+  // Normally waits for the fade-out transition to end before actually
+  // hiding — but if that transitionend is ever missed (e.g. the caller
+  // immediately navigates elsewhere, like switching straight to the Rulers
+  // & Dynasties page, which can interrupt the running transition), the
+  // modal's full-screen backdrop would otherwise stay stuck on top of
+  // whatever opens next. The timeout is a safety net that force-hides it
+  // regardless; `finished` stops the two from double-firing.
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    dom.modal.hidden = true;
+    document.body.style.overflow = '';
+    dom.modal.classList.remove('rp-profile-modal', 'em-modal', 'map-modal', 'bibliography-modal', 'author-modal', 'legacy-modal');
+  };
+  dom.modalPanel.addEventListener('transitionend', finish, { once: true });
+  setTimeout(finish, 450);
+}
+
+// Shared by the "Timeline" nav link and the logo button — both should land
+// back on the live timeline (era 0) rather than a modal.
+function goToHome() {
+  if (!dom.modal.hidden) closeModal();
+  closeSubpages();
+  closeRulersPage();
+  closeAtGlancePage();
+  closeMapPage();
+  clearSearchAndFilter();
+  setActiveNavLink('overview');
+  setLocationPath('/timeline');
+}
+
+/* ─────────────────────────────────────────
+   SHARE MENU — one instance each in #modal, .rp-panel and .ag-panel.
+   The URL is always read live from the address bar rather than computed
+   here, since every route that opens one of these already calls
+   setLocationPath() to give itself a real, shareable address before (or
+   as) it opens — see openModal/openRulerProfileModal/activateNavKey.
+───────────────────────────────────────── */
+const shareMenus = [];
+
+function closeShareMenu(btn, menu) {
+  if (!btn || !menu || menu.hidden) return;
+  menu.hidden = true;
+  btn.classList.remove('is-open');
+  btn.setAttribute('aria-expanded', 'false');
+}
+
+function closeAllShareMenus() {
+  shareMenus.forEach(({ btn, menu }) => closeShareMenu(btn, menu));
+}
+
+function openShareMenu(btn, menu) {
+  const url = window.location.href;
+  const title = getCurrentPageLabel();
+  const targets = {
+    facebook: 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(url),
+    x:        'https://twitter.com/intent/tweet?url=' + encodeURIComponent(url) + '&text=' + encodeURIComponent(title),
+    linkedin: 'https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(url),
+    email:    'mailto:?subject=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(url),
+  };
+  Object.keys(targets).forEach(key => {
+    const link = menu.querySelector(`[data-share-action="${key}"]`);
+    if (link) link.href = targets[key];
+  });
+  menu.hidden = false;
+  btn.classList.add('is-open');
+  btn.setAttribute('aria-expanded', 'true');
+}
+
+// Falls back to a hidden-textarea + execCommand('copy') on browsers/contexts
+// without the async Clipboard API (e.g. non-HTTPS local dev over plain
+// http://localhost, where navigator.clipboard is unavailable).
+function copyTextToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy') ? resolve() : reject(new Error('execCommand failed'));
+    } catch (err) {
+      reject(err);
+    } finally {
+      document.body.removeChild(ta);
+    }
+  });
+}
+
+function handleShareCopy(item) {
+  const tag = item.querySelector('.share-copied-tag');
+  copyTextToClipboard(window.location.href).then(() => {
+    if (!tag) return;
+    tag.hidden = false;
+    clearTimeout(item._copyHideTimer);
+    item._copyHideTimer = setTimeout(() => { tag.hidden = true; }, 1800);
+  }).catch(() => {});
+}
+
+function bindShareMenu(wrap, btn, menu) {
+  if (!wrap || !btn || !menu) return;
+  shareMenus.push({ btn, menu });
+
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const isOpen = !menu.hidden;
+    closeAllShareMenus();
+    if (!isOpen) openShareMenu(btn, menu);
+  });
+
+  menu.querySelectorAll('[data-share-action]').forEach(item => {
+    if (item.dataset.shareAction === 'copy') {
+      item.addEventListener('click', e => { e.preventDefault(); handleShareCopy(item); });
+    } else {
+      item.addEventListener('click', () => closeShareMenu(btn, menu));
+    }
+  });
+
+  document.addEventListener('click', e => {
+    if (!menu.hidden && !wrap.contains(e.target)) closeShareMenu(btn, menu);
+  });
+}
+
+/* ─────────────────────────────────────────
+   CONTACT MODAL
+───────────────────────────────────────── */
+function getRecaptchaToken(action) {
+  const siteKey = document.querySelector('meta[name="recaptcha-site-key"]')?.content;
+  if (!siteKey || typeof grecaptcha === 'undefined') return Promise.resolve('');
+  return new Promise(resolve => {
+    grecaptcha.ready(() => {
+      grecaptcha.execute(siteKey, { action }).then(resolve).catch(() => resolve(''));
+    });
+  });
+}
+
+// Reads the currently visible page/modal directly from app state rather than
+// document.title — the SPA never updates document.title on client-side route
+// changes (setLocationPath only touches the URL), so it goes stale the moment
+// a visitor navigates without a full reload.
+function getCurrentPageLabel() {
+  if (!dom.modal.hidden) {
+    // Every modal type now shares the same sticky #modal-title (rp-profile
+    // included, since it started rendering the ruler's name there too) —
+    // rp-profile's year tag is always empty, so it naturally falls through
+    // to the title-only case below.
+    const year  = dom.modalYearTag.textContent.trim();
+    const title = dom.modalTitle.textContent.trim();
+    if (year && title) return `${year} - ${title}`;
+    if (title) return title;
+  }
+  const activeNavKey = document.querySelector('.nav-link.active')?.dataset.nav;
+  if (activeNavKey === 'rulers-dynasties') return 'Rulers & Dynasties';
+  if (activeNavKey === 'at-glance') return 'At a Glance';
+  if (activeNavKey === 'map') return 'British Expansion Through the Years';
+  return 'Timeline';
+}
+
+function openContactModal() {
+  dom.contactModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  if (dom.contactPage) dom.contactPage.value = getCurrentPageLabel();
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    dom.contactModalPanel.classList.add('is-open');
+  }));
+}
+
+function closeContactModal() {
+  dom.contactModalPanel.classList.remove('is-open');
+  dom.contactModalPanel.addEventListener('transitionend', () => {
+    dom.contactModal.hidden = true;
+    document.body.style.overflow = '';
+  }, { once: true });
+}
+
+/* ─────────────────────────────────────────
+   SCROLL HINT
+───────────────────────────────────────── */
+function addScrollHint() {
+  const el = document.createElement('div');
+  el.id = 'scroll-hint';
+  el.innerHTML = `
+    <svg class="scroll-mouse" viewBox="0 0 14 22" width="13" height="20" aria-hidden="true">
+      <rect x="1" y="1" width="12" height="20" rx="6" ry="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <circle class="scroll-mouse-dot" cx="7" cy="7" r="1.5" fill="currentColor"/>
+    </svg>
+    <span class="scroll-hint-text">SCROLL</span>`;
+  document.body.appendChild(el);
+  dom.scrollHint = el;
+}
+
+/* ─────────────────────────────────────────
+   BIND EVENTS
+───────────────────────────────────────── */
+// Toggles .is-scrolled on a scrolling overlay (#modal, #rulers-page,
+// #at-glance-page) as soon as it's scrolled at all — style.css shrinks the
+// sticky title bar's heading with a CSS transition while that class is
+// present, so the shrink itself reads as a smooth scale-down rather than
+// an instant jump.
+function bindTitleShrink(el) {
+  if (!el) return;
+  el.addEventListener('scroll', () => {
+    el.classList.toggle('is-scrolled', el.scrollTop > 4);
+  }, { passive: true });
+}
+
+// Marks the era navigation only when it has reached its desktop sticky
+// position. This is intentionally separate from .is-scrolled, which is set
+// as soon as the page moves and therefore fires before the navigation sticks.
+// Map page: a scroll down that stops between the top of the page and the
+// era buttons' sticky position finishes the trip, so the header gets out of
+// the way and the eras, slider and map are all in view. Scrolling up is
+// left alone. Desktop/tablet only, matching where .cm-controls is sticky.
+function bindMapControlsSnap(scroller, controls) {
+  if (!scroller || !controls) return;
+  let lastTop = scroller.scrollTop, goingDown = false, timer = 0;
+  scroller.addEventListener('scroll', () => {
+    const top = scroller.scrollTop;
+    goingDown = top > lastTop;
+    lastTop = top;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (!goingDown || !window.matchMedia('(min-width:901px)').matches) return;
+      const pad = parseFloat(getComputedStyle(scroller).paddingTop) || 0;
+      const stickTop = scroller.getBoundingClientRect().top + pad + (parseFloat(getComputedStyle(controls).top) || 0);
+      const target = scroller.scrollTop + controls.getBoundingClientRect().top - stickTop;
+      if (scroller.scrollTop > 0 && scroller.scrollTop < target - 2) {
+        scroller.scrollTo({ top: target, behavior: 'smooth' });
+      }
+    }, 140);
+  }, { passive:true });
+}
+
+function bindAgEraStickyState(scroller, list) {
+  if (!scroller || !list) return;
+  const update = () => {
+    const desktop = window.matchMedia('(min-width:901px)').matches;
+    // Sticky offsets are measured inside the scroller's padding box.
+    const stickyTop = scroller.getBoundingClientRect().top
+      + (parseFloat(getComputedStyle(scroller).paddingTop) || 0)
+      + (parseFloat(getComputedStyle(list).top) || 0);
+    const stuck = desktop && scroller.scrollTop > 0 && list.getBoundingClientRect().top <= stickyTop + 1;
+    list.classList.toggle('is-stuck', stuck);
+    // At a Glance only (lists declaring --ag-era-compact): collapse the
+    // cards only once the content below has reached the compact bar's
+    // bottom edge, so shrinking never leaves a gap above the content. The
+    // list's height + margin-bottom is constant, so toggling this doesn't
+    // move the content and can't oscillate.
+    const compactH = parseFloat(getComputedStyle(list).getPropertyValue('--ag-era-compact'));
+    if (compactH) {
+      const next = [...list.parentElement.children].find(el => el !== list && !el.hidden && el.offsetParent);
+      list.classList.toggle('is-compact', stuck && !!next && next.getBoundingClientRect().top <= stickyTop + compactH + 1);
+    }
+  };
+  scroller.addEventListener('scroll', update, { passive:true });
+  window.addEventListener('resize', update, { passive:true });
+  update();
+}
+
+function bindEvents() {
+  // Direction arrows — set ascending or descending year order
+  dom.orderAsc.addEventListener('click',  () => setOrder('asc'));
+  dom.orderDesc.addEventListener('click', () => setOrder('desc'));
+
+  // Filter dropdown
+  dom.filterBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    const isOpen = !dom.filterMenu.hidden;
+    dom.filterMenu.hidden = isOpen;
+    dom.filterBtn.classList.toggle('is-open', !isOpen);
+    dom.filterBtn.setAttribute('aria-expanded', String(!isOpen));
+  });
+  dom.filterMenu.addEventListener('click', e => {
+    const opt = e.target.closest('.filter-option');
+    if (!opt) return;
+    setFilter(opt.dataset.filter);
+    dom.filterMenu.hidden = true;
+    dom.filterBtn.classList.remove('is-open');
+    dom.filterBtn.setAttribute('aria-expanded', 'false');
+  });
+  document.addEventListener('click', e => {
+    if (dom.filterWrap && !dom.filterWrap.contains(e.target)) {
+      dom.filterMenu.hidden = true;
+      dom.filterBtn.classList.remove('is-open');
+      dom.filterBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  // Language dropdown — a single "EN" option, but opens/closes like a real dropdown
+  if (dom.langToggle && dom.langMenu) {
+    dom.langToggle.addEventListener('click', e => {
+      e.stopPropagation();
+      const isOpen = !dom.langMenu.hidden;
+      dom.langMenu.hidden = isOpen;
+      dom.langToggle.classList.toggle('is-open', !isOpen);
+      dom.langToggle.setAttribute('aria-expanded', String(!isOpen));
+    });
+    dom.langMenu.addEventListener('click', e => {
+      if (!e.target.closest('.lang-option')) return;
+      dom.langMenu.hidden = true;
+      dom.langToggle.classList.remove('is-open');
+      dom.langToggle.setAttribute('aria-expanded', 'false');
+    });
+    document.addEventListener('click', e => {
+      if (dom.langWrap && !dom.langWrap.contains(e.target)) {
+        dom.langMenu.hidden = true;
+        dom.langToggle.classList.remove('is-open');
+        dom.langToggle.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  // Share dropdowns — one per panel that can have a real shareable URL
+  bindShareMenu(dom.modalShareWrap, dom.modalShareBtn, dom.modalShareMenu);
+  bindShareMenu(dom.rpShareWrap, dom.rpShareBtn, dom.rpShareMenu);
+  bindShareMenu(dom.agShareWrap, dom.agShareBtn, dom.agShareMenu);
+  bindShareMenu(dom.cmShareWrap, dom.cmShareBtn, dom.cmShareMenu);
+
+  // Search
+  dom.searchInput.addEventListener('input', () => setSearch(dom.searchInput.value));
+  dom.searchInput.addEventListener('keydown', e => { if (e.key === 'Escape') { dom.searchInput.value = ''; setSearch(''); } });
+  dom.searchClear.addEventListener('click', () => { dom.searchInput.value = ''; setSearch(''); dom.searchInput.focus(); });
+
+  // Filter banner
+  if (dom.filterBannerClear) dom.filterBannerClear.addEventListener('click', clearSearchAndFilter);
+
+  // Event pagination
+  dom.prevEvent.addEventListener('click', () => navigateEvent(-1));
+  dom.nextEvent.addEventListener('click', () => navigateEvent(1));
+
+  // Order toggle
+  dom.orderToggle.addEventListener('click', toggleOrder);
+
+  // Read More → modal
+  dom.readMoreBtn.addEventListener('click', () => {
+    const era = getOrderedEras()[state.activeEra];
+    if (era) openModal(era, state.activeEvent);
+  });
+
+  // Ruler card (left side) → profile modal, same as the "View full profile" tooltip link
+  dom.rulerCard.addEventListener('click', e => {
+    const ruler = RULERS[state.activeRulerIdx];
+    if (!ruler) return;
+    if (e.target.closest('.rs-view-dynasty')) {
+      viewFullDynasty(ruler);
+    } else {
+      openRulerProfileModal(ruler);
+    }
+  });
+
+  // Modal close
+  dom.modalClose.addEventListener('click', closeModalAndSyncHash);
+  dom.modalBackdrop.addEventListener('click', closeModalAndSyncHash);
+  dom.modalPrevious.addEventListener('click', () => navigateModal(-1));
+  dom.modalNext.addEventListener('click', () => navigateModal(1));
+  dom.lightboxClose.addEventListener('click', closeImageLightbox);
+  dom.lightboxBackdrop.addEventListener('click', closeImageLightbox);
+  dom.familyTreeLightboxClose.addEventListener('click', closeFamilyTreeLightbox);
+  dom.familyTreeLightboxBackdrop.addEventListener('click', closeFamilyTreeLightbox);
+  if (dom.mapViewer) {
+    dom.mapViewerClose.addEventListener('click', closeMapViewer);
+    dom.mapViewerBackdrop.addEventListener('click', closeMapViewer);
+  }
+
+  // ── Wheel: accumulate delta, jump proportional number of eras ──
+  const WHEEL_STEP = 190;     // px per era step — ~one standard mouse notch on default Windows settings
+  const WHEEL_MAX_STEP = 3;   // max eras jumped in one burst
+  let wheelResetTimer = null;
+
+  window.addEventListener('wheel', e => {
+    if (!dom.modal.hidden) return;
+    // Full-page overlays (Rulers & Dynasties, At a Glance, Noble Family
+    // profile) need their own native scroll — without this they'd never
+    // receive wheel input at all, since it'd always be consumed here for
+    // era-navigation first. familyPage only exists in the DOM at all on
+    // /families and /families/{slug} (see includes/render-family.php), so
+    // its mere presence already means "this route, don't hijack scroll".
+    if (!dom.rulersPage.hidden || !dom.atGlancePage.hidden || (dom.mapPage && !dom.mapPage.hidden) || subpageOpen() || dom.familyPage) return;
+    e.preventDefault();
+
+    state.wheelAccum += e.deltaY;
+
+    const raw   = Math.trunc(state.wheelAccum / WHEEL_STEP);
+    const steps = Math.sign(raw) * Math.min(Math.abs(raw), WHEEL_MAX_STEP);
+    if (steps !== 0) {
+      state.wheelAccum -= steps * WHEEL_STEP;
+      goToEra(state.activeEra + steps);
+    }
+
+    clearTimeout(wheelResetTimer);
+    wheelResetTimer = setTimeout(() => { state.wheelAccum = 0; }, 300);
+  }, { passive: false });
+
+  // ── Keyboard ──
+  document.addEventListener('keydown', e => {
+    // The map framed by the map viewer (/map?embed=1): Escape closes the
+    // viewer in the page around it rather than leaving the map.
+    if (e.key === 'Escape' && document.body.classList.contains('map-embed')) {
+      if (window.parent !== window && window.parent.closeMapViewer) window.parent.closeMapViewer();
+      return;
+    }
+    if (dom.mapViewer && !dom.mapViewer.hidden) {
+      if (e.key === 'Escape') closeMapViewer();
+      return;
+    }
+    if (!dom.familyTreeLightbox.hidden) {
+      if (e.key === 'Escape') closeFamilyTreeLightbox();
+      return;
+    }
+    if (!dom.imageLightbox.hidden) {
+      if (e.key === 'Escape') closeImageLightbox();
+      return;
+    }
+    if (!dom.contactModal.hidden) {
+      if (e.key === 'Escape') closeContactModal();
+      return;
+    }
+    if (!dom.modal.hidden) {
+      if (e.key === 'Escape') closeModalAndSyncHash();
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigateModal(-1);
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navigateModal(1);
+      }
+      return;
+    }
+    // The map page has its own shortcuts (chapters, play) — the hidden
+    // timeline underneath must not react to them.
+    if (dom.mapPage && !dom.mapPage.hidden) {
+      if (e.key === 'Escape') {
+        closeMapPage();
+        setActiveNavLink('overview');
+        setLocationPath('/timeline');
+      } else {
+        window.BritishMap.handleKey(e);
+      }
+      return;
+    }
+    switch (e.key) {
+      case 'ArrowDown': case 'PageDown':
+        e.preventDefault(); goToEra(state.activeEra + 1); break;
+      case 'ArrowUp': case 'PageUp':
+        e.preventDefault(); goToEra(state.activeEra - 1); break;
+      case 'ArrowRight': navigateEvent(1);  break;
+      case 'ArrowLeft':  navigateEvent(-1); break;
+      case 'Home': e.preventDefault(); goToEra(0); break;
+      case 'End':  e.preventDefault(); goToEra(state.eras.length - 1); break;
+    }
+  });
+
+  // ── Touch swipe ──
+  // Whichever axis moved further wins — the timeline runs vertically at
+  // every breakpoint, so an up/down drag is the natural gesture, but a
+  // clear left/right swipe (e.g. over the content panel) still navigates.
+  let tx = 0, ty = 0;
+  document.addEventListener('touchstart', e => {
+    tx = e.touches[0].clientX;
+    ty = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (!dom.modal.hidden) return;
+    if (dom.mapPage && !dom.mapPage.hidden) return;
+    const dx = tx - e.changedTouches[0].clientX;
+    const dy = ty - e.changedTouches[0].clientY;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (Math.abs(dx) < 44) return;
+      goToEra(state.activeEra + (dx > 0 ? 1 : -1));
+    } else {
+      if (Math.abs(dy) < 44) return;
+      goToEra(state.activeEra + (dy > 0 ? 1 : -1));
+    }
+  }, { passive: true });
+
+  // Contact modal
+  dom.mistakeLink.addEventListener('click', openContactModal);
+  if (dom.rpMistakeBtn) dom.rpMistakeBtn.addEventListener('click', openContactModal);
+  dom.contactModalClose.addEventListener('click', closeContactModal);
+  dom.contactModalBackdrop.addEventListener('click', closeContactModal);
+  dom.contactForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const submit   = dom.contactForm.querySelector('.contact-submit');
+    const feedback = document.getElementById('contact-feedback');
+
+    submit.disabled    = true;
+    submit.textContent = 'Sending…';
+    feedback.textContent = '';
+    feedback.className = 'contact-feedback';
+
+    try {
+      const token    = await getRecaptchaToken('contact_form');
+      const formData = new FormData(dom.contactForm);
+      formData.set('g-recaptcha-response', token);
+      const res  = await fetch('contact-handler.php', {
+        method:  'POST',
+        headers: { Accept: 'application/json' },
+        body:    formData,
+      });
+      const json = await res.json();
+      if (res.ok) {
+        feedback.textContent = json.message || 'Your message has been sent. Thank you!';
+        feedback.className   = 'contact-feedback contact-feedback--success';
+        dom.contactForm.reset();
+      } else {
+        feedback.textContent = json.message || 'Something went wrong. Please try again.';
+        feedback.className   = 'contact-feedback contact-feedback--error';
+      }
+    } catch {
+      feedback.textContent = 'Could not send the message. Please try again later.';
+      feedback.className   = 'contact-feedback contact-feedback--error';
+    } finally {
+      submit.disabled    = false;
+      submit.textContent = 'Send a message';
+    }
+  });
+
+  // ── Logo: return to start (intro) ──
+  if (dom.appLogoBtn) {
+    dom.appLogoBtn.addEventListener('click', () => {
+      goToHome();
+      closeMobileNav();
+    });
+  }
+
+  // ── Nav links ──
+  document.querySelectorAll('.nav-link[data-nav]').forEach(l => {
+    l.addEventListener('click', e => {
+      e.preventDefault();
+      activateNavKey(l.dataset.nav);
+      closeMobileNav();
+    });
+  });
+
+  // ── URL path routing — /timeline, /rulers, /map, /legacy, /bibliography, /about (and their deep links) ──
+  window.addEventListener('popstate', routeFromPath);
+
+  // ── Mobile burger menu ──
+  if (dom.navBurger) {
+    dom.navBurger.addEventListener('click', () => {
+      const isOpen = dom.navLinksList.classList.toggle('is-open');
+      dom.navBurger.setAttribute('aria-expanded', String(isOpen));
+      dom.navBurger.classList.toggle('is-open', isOpen);
+    });
+  }
+  document.addEventListener('click', e => {
+    if (!dom.navLinksList || !dom.navLinksList.classList.contains('is-open')) return;
+    if (dom.navLinksList.contains(e.target) || dom.navBurger.contains(e.target)) return;
+    closeMobileNav();
+  });
+
+  // ── Rulers & Dynasties page ──
+  if (dom.rpClose) dom.rpClose.addEventListener('click', () => {
+    closeRulersPage();
+    setActiveNavLink('overview');
+    setLocationPath('/timeline');
+  });
+
+  // ── At a Glance page ──
+  if (dom.agClose) dom.agClose.addEventListener('click', () => {
+    closeAtGlancePage();
+    setActiveNavLink('overview');
+    setLocationPath('/timeline');
+  });
+
+  // ── Map page ──
+  if (dom.cmClose) dom.cmClose.addEventListener('click', () => {
+    closeMapPage();
+    setActiveNavLink('overview');
+    setLocationPath('/timeline');
+  });
+  document.querySelectorAll('.cm-mistake-btn').forEach(btn => {
+    btn.addEventListener('click', openContactModal);
+  });
+
+  // Sticky title shrink-on-scroll — shared #modal, plus the full pages
+  bindTitleShrink(dom.modal);
+  bindTitleShrink(dom.rulersPage);
+  bindTitleShrink(dom.atGlancePage);
+  bindTitleShrink(dom.mapPage);
+  bindAgEraStickyState(dom.mapPage, dom.cmControls);
+  bindMapControlsSnap(dom.mapPage, dom.cmControls);
+  Object.keys(SUBPAGES).forEach(k => bindTitleShrink(subpageEl(k)));
+  bindSubpageEvents();
+  bindAgEraStickyState(dom.atGlancePage, dom.agEraList);
+  document.querySelectorAll('.ag-detail-footer').forEach(footer => initModalSourceSlider(footer));
+  document.querySelectorAll('.ag-mistake-btn').forEach(btn => {
+    btn.addEventListener('click', openContactModal);
+  });
+  if (dom.agEraList) dom.agEraList.addEventListener('click', e => {
+    const item = e.target.closest('.ag-era-item');
+    if (item) setAgActiveEra(item.dataset.eraId);
+  });
+  if (dom.agEraList) dom.agEraList.addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const items = [...dom.agEraList.querySelectorAll('.ag-era-item')];
+    const current = e.target.closest('.ag-era-item');
+    const currentIndex = items.indexOf(current);
+    if (currentIndex < 0) return;
+    e.preventDefault();
+    let nextIndex = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
+      : (currentIndex + (e.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
+    items[nextIndex].focus();
+    setAgActiveEra(items[nextIndex].dataset.eraId);
+  });
+  document.querySelectorAll('.ag-explore-rulers').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const dynastyId = link.dataset.dynasty;
+      if (!dynastyId) return;
+      closeAtGlancePage();
+      openRulersPage();
+      setRpTab('all');
+      setRpDynastyFilter(dynastyId);
+      setActiveNavLink('rulers-dynasties');
+      setLocationPath('/rulers', dynastySlug(dynastyId));
+    });
+  });
+
+  // Key Events list — same hover-tooltip + click-to-open behavior as the
+  // ruler modal's "Events During Reign" list (showRpEventTooltip et al.
+  // are shared, generic utilities despite the "Rp" name). Only entries the
+  // curated content links to a real event (.ag-event--linked, carrying
+  // data-event-slug) are interactive; eventBySlug is looked up lazily
+  // inside these callbacks rather than at bind time since buildSlugMaps()
+  // hasn't run yet this early in init().
+  document.querySelectorAll('.ag-event--linked').forEach(el => {
+    const slug = el.dataset.eventSlug;
+    const open = () => {
+      const target = eventBySlug.get(slug);
+      if (!target) return;
+      hideRpEventTooltip();
+      // Opening from here should land on top of the At a Glance page and,
+      // on close, fade back into it rather than dropping to the timeline.
+      state.modalReturnAtGlance = true;
+      openModal(target.era, target.eventIndex);
+    };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+    // Hero and theme cards already show their own text — tooltip only
+    // for the Key Events rows.
+    if (!el.classList.contains('ag-event')) return;
+
+    const showTooltip = () => {
+      const target = eventBySlug.get(slug);
+      const text = target && target.era.events[target.eventIndex].text;
+      if (text) showRpEventTooltip(text, el);
+    };
+    el.addEventListener('mouseenter', showTooltip);
+    el.addEventListener('mouseleave', hideRpEventTooltip);
+    el.addEventListener('focus', showTooltip);
+    el.addEventListener('blur', hideRpEventTooltip);
+  });
+
+  // "View full timeline" / "Explore all N events" — back to the timeline,
+  // positioned on the period's first event (no modal).
+  document.querySelectorAll('.ag-timeline-link, .ag-explore-events').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const target = eventBySlug.get(link.dataset.eventSlug);
+      closeAtGlancePage();
+      setActiveNavLink('overview');
+      setLocationPath('/timeline');
+      if (!target) return;
+      goToEra(getOrderedEras().indexOf(target.era));
+    });
+  });
+
+  if (dom.rpSearchInput) {
+    dom.rpSearchInput.addEventListener('input', () => setRpSearch(dom.rpSearchInput.value));
+    dom.rpSearchInput.addEventListener('keydown', e => { if (e.key === 'Escape') { dom.rpSearchInput.value = ''; setRpSearch(''); } });
+  }
+  if (dom.rpSearchClear) dom.rpSearchClear.addEventListener('click', () => { dom.rpSearchInput.value = ''; setRpSearch(''); dom.rpSearchInput.focus(); });
+  if (dom.rpTabs) dom.rpTabs.addEventListener('click', e => {
+    const btn = e.target.closest('.rp-tab');
+    if (btn) setRpTab(btn.dataset.tab);
+  });
+  if (dom.rpPagePrev) dom.rpPagePrev.addEventListener('click', rpPrevPage);
+  if (dom.rpDynastyLabels) dom.rpDynastyLabels.addEventListener('click', e => {
+    const btn = e.target.closest('.rp-dynasty-label[data-dynasty]');
+    if (btn) setRpDynastyFilterAndSyncUrl(btn.dataset.dynasty);
+  });
+  if (dom.rpLegend) dom.rpLegend.addEventListener('click', e => {
+    const btn = e.target.closest('.rp-legend-item[data-dynasty]');
+    if (btn) setRpDynastyFilterAndSyncUrl(btn.dataset.dynasty);
+  });
+  if (dom.rpAvatars) {
+    dom.rpAvatars.addEventListener('click', e => {
+      if (e.target.closest('.rp-avatar-more')) { rpNextPage(); return; }
+      const btn = e.target.closest('.rp-avatar[data-idx]');
+      if (!btn) return;
+      hideRpTooltip();
+      openRulerProfileModal(RULERS[Number(btn.dataset.idx)]);
+    });
+    dom.rpAvatars.addEventListener('mouseover', e => {
+      const btn = e.target.closest('.rp-avatar[data-idx]');
+      if (btn) showRpTooltip(RULERS[Number(btn.dataset.idx)], btn);
+    });
+    dom.rpAvatars.addEventListener('mouseout', e => {
+      const btn = e.target.closest('.rp-avatar[data-idx]');
+      if (btn && !btn.contains(e.relatedTarget)) scheduleHideRpTooltip();
+    });
+    dom.rpAvatars.addEventListener('focusin', e => {
+      const btn = e.target.closest('.rp-avatar[data-idx]');
+      if (btn) showRpTooltip(RULERS[Number(btn.dataset.idx)], btn);
+    });
+    dom.rpAvatars.addEventListener('focusout', e => {
+      const btn = e.target.closest('.rp-avatar[data-idx]');
+      if (btn) scheduleHideRpTooltip();
+    });
+  }
+  if (dom.rpTooltip) {
+    dom.rpTooltip.addEventListener('mouseover', () => clearTimeout(rpTooltipHideTimer));
+    dom.rpTooltip.addEventListener('mouseout', e => {
+      if (!dom.rpTooltip.contains(e.relatedTarget)) scheduleHideRpTooltip();
+    });
+  }
+
+  // ── Resize ──
+  let rpResizeTimer = null;
+  let eraNavResizeTimer = null;
+  window.addEventListener('resize', () => {
+    const start = Math.max(0, state.activeEra - WINDOW_HALF);
+    positionTimeline(state.activeEra, start);
+
+    // Debounced: mobile browsers (iOS Safari/Edge) fire `resize` repeatedly
+    // while their address bar collapses/expands during a scroll, not just
+    // on real viewport changes. updateEraNav() measures live layout via
+    // rAF, so recalculating on every one of those transient firings could
+    // catch the nav mid-transition and shove the chips off-screen — wait
+    // for the burst to settle before trusting the measurement.
+    clearTimeout(eraNavResizeTimer);
+    eraNavResizeTimer = setTimeout(updateEraNav, 150);
+
+    if (!dom.rulersPage.hidden) {
+      clearTimeout(rpResizeTimer);
+      rpResizeTimer = setTimeout(updateRpPageSize, 150);
+    }
+  });
+}

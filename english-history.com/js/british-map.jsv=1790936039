@@ -1,0 +1,700 @@
+/* ═══════════════════════════════════════════
+   HISTORY OF GREAT BRITAIN — MAP PAGE
+   british-map.js
+
+   Interactive "British Expansion Through the Years" map on /map. The page
+   shell is server-rendered (includes/partials/map.php); this file loads
+   data/map-data-greatbritain.json through data.php the first time the page
+   opens and drives the map, the chapter panel and the year slider.
+   main.js only calls BritishMap.open()/close()/handleKey(), plus
+   renderThumb() for the event modal's "Great Britain in YEAR" card.
+
+   Data model: each region is a dated border snapshot (from..to, inclusive)
+   of one polity; it is drawn while the shown year falls inside it and
+   coloured by whether that polity is the British home realm, part of the
+   empire, a Dominion, or a key rival/partner in the current chapter.
+═══════════════════════════════════════════ */
+'use strict';
+
+window.BritishMap = (() => {
+  const NS = 'http://www.w3.org/2000/svg';
+  const $ = id => document.getElementById(id);
+
+  const CATS = {
+    gb:    'British state (home realm)',
+    emp:   'Colony, protectorate or Company rule',
+    dom:   'Self-governing Dominion',
+    lin:   'Key rival or partner',
+    other: 'Other polity',
+  };
+  const OT_FROM = 1983;   // British Overseas Territories (as so named)
+  const REF_FROM = 1922;  // modern UK outline shown at full strength from here
+
+  let D = null;          // dataset
+  let KF = [];           // keyframes (story chapters)
+  let GB, EMP, DOM;      // region-name sets / lookup
+  let loading = null;    // in-flight data promise
+  let built = false;
+  let isOpen = false;
+
+  let svg, stage, tip, slider;
+  let regs = [];         // { r, el, on, cls }
+  let placesEls = [];    // { p, el }
+  let knots = [];        // [sliderPos, year] pairs — chapters spaced evenly
+  let vb = [0, 0, 1000, 600];
+  let curView = null;
+  let follow = true;
+  let year = 43;
+  let shownYear = null;  // last whole year the regions were drawn for
+  let playing = false;
+  let speed = 1;
+  let lastKF = -1;
+  let areaTip = '';
+  let hashTimer = null;
+  let hintTimer = null;
+  const raf = { go: 0, play: 0, fly: 0 };
+
+  const fmtYear = y => { y = Math.round(y); return y < 0 ? `${-y} BC` : (y < 1000 ? `AD ${y}` : String(y)); };
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const fmtArea = a => a >= 1e6 ? `${(a / 1e6).toFixed(1)} million km²` : `${Math.round(a / 1000).toLocaleString('en-GB')},000 km²`;
+
+  function loadData() {
+    if (loading) return loading;
+    const token = (document.querySelector('meta[name="data-token"]') || {}).content || '';
+    loading = fetch(new URL('data.php?file=expansion-map', document.baseURI), { headers: { 'X-Data-Token': token } })
+      .then(r => { if (!r.ok) throw new Error('Cannot load map data'); return r.json(); })
+      .catch(err => { loading = null; throw err; });
+    return loading;
+  }
+
+  /* ── Slider scale: chapters spaced evenly so early centuries are not squeezed ── */
+  function buildKnots() {
+    const ys = [...new Set([D.yearRange[0], ...KF.map(k => k.year), D.yearRange[1]])].sort((a, b) => a - b);
+    knots = ys.map((y, i) => [i / (ys.length - 1) * 1000, y]);
+  }
+  function posToYear(p) {
+    for (let i = 1; i < knots.length; i++) if (p <= knots[i][0]) {
+      const a = knots[i - 1], b = knots[i];
+      return a[1] + (b[1] - a[1]) * (p - a[0]) / (b[0] - a[0]);
+    }
+    return knots[knots.length - 1][1];
+  }
+  function yearToPos(y) {
+    for (let i = 1; i < knots.length; i++) if (y <= knots[i][1]) {
+      const a = knots[i - 1], b = knots[i];
+      return a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1] || 1);
+    }
+    return 1000;
+  }
+
+  function eraAt(y) { let e = D.eras[0]; D.eras.forEach(x => { if (y >= x.from) e = x; }); return e; }
+  function kfIndexAt(y) { let idx = 0; KF.forEach((k, i) => { if (y >= k.year - 0.001) idx = i; }); return idx; }
+  function labelFor(r, y) {
+    const l = D.labels.find(l => l.name === r.name && l.from <= y && y <= l.to);
+    return l ? l.label : r.name;
+  }
+  function catFor(r, y, lineage) {
+    if (GB.has(r.name)) return 'gb';
+    if (EMP.has(r.name)) return 'emp';
+    const d = DOM[r.name];
+    if (d && d.from <= y && y <= d.to) return 'dom';
+    if (lineage.has(r.name)) return 'lin';
+    return 'other';
+  }
+
+  // Web Mercator graticule matching the data's projection (see D.projection).
+  function graticule() {
+    const W = D.width, latN = D.projection.lat_north * Math.PI / 180;
+    const yOf = lat => (Math.log(Math.tan(Math.PI / 4 + latN / 2)) - Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))) * W / (2 * Math.PI);
+    let d = '';
+    for (let lon = -180; lon <= 180; lon += 30) {
+      const x = ((lon + 180) / 360 * W).toFixed(0);
+      d += `M${x},0V${D.height}`;
+    }
+    for (let lat = -40; lat <= 80; lat += 20) d += `M0,${yOf(lat).toFixed(0)}H${W}`;
+    return d;
+  }
+
+  /* ── Build (once, after the data arrives) ── */
+  function build() {
+    KF = D.keyframes;
+    D.yearRange = [KF[0].year, KF[KF.length - 1].year];
+    GB = new Set(D.british);
+    EMP = new Set(D.empire);
+    DOM = {};
+    D.dominions.forEach(d => { DOM[d.name] = d; });
+
+    svg = $('cm-svg'); stage = $('cm-stage'); tip = $('cm-tip'); slider = $('cm-slider');
+    const gR = $('cm-regions'), gP = $('cm-places');
+
+    $('cm-loading').remove();
+    $('cm-sphere').setAttribute('d', `M0,0H${D.width}V${D.height}H0Z`);
+    $('cm-grat').setAttribute('d', graticule());
+    $('cm-land').setAttribute('d', D.land);
+    $('cm-ref').setAttribute('d', D.reference);
+    vb = D.views.world.slice();
+
+    D.regions.forEach(r => {
+      const p = document.createElementNS(NS, 'path');
+      p.setAttribute('d', r.d);
+      p.setAttribute('class', 'cm-reg');
+      p.style.display = 'none';
+      p.addEventListener('mousemove', ev => showRegionTip(ev, r));
+      p.addEventListener('mouseleave', hideTip);
+      p.addEventListener('click', ev => showRegionTip(ev, r));
+      gR.appendChild(p);
+      regs.push({ r, el: p, on: false, cls: '' });
+    });
+
+    D.overseasTerritories.forEach(pl => {
+      const g = document.createElementNS(NS, 'g');
+      g.setAttribute('class', 'cm-place');
+      g.style.opacity = 0;
+      g.style.pointerEvents = 'none';
+      g.innerHTML = '<circle class="cm-halo"></circle><circle class="cm-dot"></circle><text></text>';
+      g.querySelector('text').textContent = pl.name;
+      g.addEventListener('mousemove', ev => showPlaceTip(ev, pl));
+      g.addEventListener('mouseleave', hideTip);
+      g.addEventListener('click', () => window.open('https://en.wikipedia.org/wiki/' + encodeURIComponent(pl.name.replace(/ /g, '_')), '_blank', 'noopener'));
+      gP.appendChild(g);
+      placesEls.push({ p: pl, el: g });
+    });
+
+    $('cm-attrib').textContent = D.attribution + ' Click an Overseas Territory marker to open its Wikipedia article.';
+
+    // Era chips
+    const erasEl = $('cm-eras');
+    erasEl.style.setProperty('--cm-era-count', D.eras.length);
+    D.eras.forEach(e => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.id = e.id;
+      b.innerHTML = `<span class="cm-era-name">${esc(e.name)}</span>`
+        + `<small>${e.from}&ndash;${e.to >= D.yearRange[1] ? 'today' : e.to}</small>`;
+      b.addEventListener('click', () => {
+        stop();
+        const k = KF.find(k => k.era === e.id) || KF.find(k => k.year >= e.from);
+        goTo(k ? k.year : e.from, true);
+      });
+      erasEl.appendChild(b);
+    });
+
+    buildKnots();
+
+    // Era segments + chapter ticks on the track
+    const segs = $('cm-segs');
+    D.eras.forEach((e, i) => {
+      const next = D.eras[i + 1];
+      const a = yearToPos(Math.max(e.from, D.yearRange[0])), b = yearToPos(next ? Math.min(next.from, D.yearRange[1]) : D.yearRange[1]);
+      const d = document.createElement('div');
+      d.style.width = ((b - a) / 10) + '%';
+      d.dataset.id = e.id;
+      d.title = e.name;
+      segs.appendChild(d);
+    });
+    const ticks = $('cm-ticks');
+    const tickLabels = document.createElement('div');
+    tickLabels.className = 'cm-tick-labels';
+    tickLabels.id = 'cm-tick-labels';
+    KF.forEach(k => {
+      const left = (yearToPos(k.year) / 10) + '%';
+      const i = document.createElement('i');
+      i.style.left = left;
+      i.title = `${fmtYear(k.year)} – ${k.title}`;
+      ticks.appendChild(i);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.style.left = left;
+      b.textContent = k.year;
+      b.title = `${fmtYear(k.year)} – ${k.title}`;
+      b.addEventListener('click', () => { stop(); goTo(k.year, true); });
+      tickLabels.appendChild(b);
+    });
+    ticks.parentNode.appendChild(tickLabels);
+    thinTickLabels();
+
+    slider.addEventListener('input', () => { stop(); cancelAnimationFrame(raf.go); setYear(posToYear(+slider.value), true); });
+    $('cm-prev').addEventListener('click', () => prevChapter());
+    $('cm-next').addEventListener('click', () => nextChapter());
+    $('cm-play').addEventListener('click', () => (playing ? stop() : start()));
+    document.querySelectorAll('#cm-speed button').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('#cm-speed button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      speed = +b.dataset.s;
+    }));
+    const fb = $('cm-follow');
+    fb.addEventListener('click', () => {
+      follow = !follow;
+      fb.setAttribute('aria-pressed', String(follow));
+      if (follow) { curView = null; flyTo(KF[kfIndexAt(year)].view); }
+    });
+    $('cm-zin').addEventListener('click', () => zoom(0.7));
+    $('cm-zout').addEventListener('click', () => zoom(1 / 0.7));
+    $('cm-zworld').addEventListener('click', () => { setFollow(false); animateVB(D.views.world); });
+    const info = $('cm-pop-info');
+    ['mouseenter', 'focus'].forEach(t => info.addEventListener(t, showAreaTip));
+    ['mouseleave', 'blur'].forEach(t => info.addEventListener(t, hideTip));
+    info.addEventListener('click', showAreaTip);
+    enablePanZoom();
+
+    built = true;
+  }
+
+  // 40 chapter years don't fit under the track at most widths: show every
+  // n-th one so neighbours never touch (the current year always shows).
+  function thinTickLabels() {
+    const btns = [...document.querySelectorAll('#cm-tick-labels button')];
+    const w = $('cm-tick-labels').offsetWidth;
+    if (!w || btns.length < 2) return;
+    const step = Math.max(1, Math.ceil(36 / (w / (btns.length - 1))));
+    btns.forEach((b, i) => b.classList.toggle('is-thin', i % step !== 0 && i !== btns.length - 1));
+    if (step > 1 && (btns.length - 1) % step && (btns.length - 1) % step < step / 2) {
+      // Last label would crowd the one before it.
+      btns[btns.length - 1 - (btns.length - 1) % step].classList.add('is-thin');
+    }
+  }
+
+  /* ── Rendering ── */
+  function drawRegions(y) {
+    const lineage = new Set(KF[kfIndexAt(y)].lineage);
+    let area = 0;
+    regs.forEach(o => {
+      const r = o.r, on = r.from <= y && y <= r.to;
+      if (on) {
+        const c = catFor(r, y, lineage);
+        if (c !== o.cls) { o.el.setAttribute('class', `cm-reg cm-reg--${c}${o.on ? ' on' : ''}`); o.cls = c; }
+        if (c === 'gb' || c === 'emp' || c === 'dom') area += r.area;
+      }
+      if (on === o.on) return;
+      o.on = on;
+      clearTimeout(o.t);
+      if (on) {
+        o.el.style.display = '';
+        requestAnimationFrame(() => requestAnimationFrame(() => { if (o.on) o.el.classList.add('on'); }));
+      } else {
+        o.el.classList.remove('on');
+        o.t = setTimeout(() => { if (!o.on) o.el.style.display = 'none'; }, 460);
+      }
+    });
+    updateArea(y, area);
+    $('cm-ref').style.opacity = y >= REF_FROM ? 0.8 : 0.35;
+    const showOT = y >= OT_FROM;
+    placesEls.forEach(o => {
+      o.el.style.opacity = showOT ? 1 : 0;
+      o.el.style.pointerEvents = showOT ? '' : 'none';
+      o.el.setAttribute('class', 'cm-place' + (showOT && y - OT_FROM < 3 ? ' new' : ''));
+    });
+  }
+
+  function setYear(y, fromSlider) {
+    year = y;
+    if (!fromSlider) slider.value = yearToPos(y);
+    const wy = Math.round(y);
+    $('cm-year').textContent = fmtYear(wy);
+    svg.setAttribute('aria-label', 'Map of British territory in ' + fmtYear(wy));
+    const era = eraAt(y);
+    $('cm-era').textContent = era.name;
+    document.querySelectorAll('#cm-eras button, #cm-segs div').forEach(b => b.classList.toggle('on', b.dataset.id === era.id));
+
+    const ki = kfIndexAt(y);
+    const kfChanged = ki !== lastKF;
+    if (wy !== shownYear || kfChanged) { shownYear = wy; drawRegions(wy); }
+    if (kfChanged) { lastKF = ki; showChapter(ki); }
+    document.querySelectorAll('#cm-ticks i, #cm-tick-labels button').forEach((t, i) => t.classList.toggle('cur', i % KF.length === ki));
+    scheduleHash();
+  }
+
+  // Keeps /map#year=NNNN in the address bar (so the Share menu and a reload
+  // land on the same year) — debounced, since playback calls setYear every frame.
+  function scheduleHash() {
+    clearTimeout(hashTimer);
+    hashTimer = setTimeout(() => {
+      if (!isOpen || !/\/map\/?$/.test(window.location.pathname)) return;
+      // Keeps the query too, so the embedded map (?embed=1) stays embedded on reload.
+      try { history.replaceState(history.state, '', window.location.pathname + window.location.search + '#year=' + Math.round(year)); } catch (e) { /* ignore */ }
+    }, 300);
+  }
+
+  // Key events are [date, title] pairs; the year column shows just the year
+  // ("1 Jan 1901" → 1901) with the full date in its tooltip. Consecutive
+  // events in the same year show the year and dot only once.
+  function eventYear(d) {
+    const m = String(d).match(/(\d+)\s*(BCE|BC)?\s*$/);
+    return m ? (m[2] ? `${m[1]} BC` : m[1]) : String(d);
+  }
+  function eventsHtml(events) {
+    let lastYear = null;
+    return events.map(([d, t]) => {
+      const y = eventYear(d), grouped = y === lastYear;
+      lastYear = y;
+      return `<li class="ag-event${grouped ? ' ag-event--grouped' : ''}">`
+        + `<span class="ag-event-year"${y !== d ? ` title="${esc(d)}"` : ''}>${grouped ? '' : esc(y)}</span>`
+        + '<span class="ag-event-dot" aria-hidden="true"></span>'
+        + `<span class="ag-event-body"><span class="ag-event-text">${esc(t)}</span></span>`
+        + '</li>';
+    }).join('');
+  }
+
+  function showChapter(i) {
+    const k = KF[i], inner = $('cm-side-inner');
+    $('cm-k-era').textContent = `${eraAt(k.year).name} · ${fmtYear(k.year)}`;
+    $('cm-k-title').textContent = k.title;
+    // Keep the final snapshot historical; the supplied note discusses a later treaty.
+    $('cm-k-text').textContent = k.year === 2024
+      ? 'In 2024, the United Kingdom comprises England, Scotland, Wales and Northern Ireland, alongside 14 British Overseas Territories. The UK is outside the European Union.'
+      : k.text;
+    const others = k.lineage.filter(n => !GB.has(n) && !EMP.has(n));
+    $('cm-k-stat-text').textContent = others.length ? `Key powers on the map: ${others.slice(0, 6).join(' · ')}` : '';
+    $('cm-k-stat').hidden = !others.length;
+    $('cm-k-events').innerHTML = eventsHtml(k.events);
+    $('cm-k-events').scrollTop = 0;
+    $('cm-k-count').textContent = `Story ${i + 1} of ${KF.length}`;
+    inner.classList.remove('is-fading');
+    void inner.offsetWidth;
+    inner.classList.add('is-fading');
+    $('cm-prev').disabled = i === 0;
+    $('cm-next').disabled = i === KF.length - 1;
+    if (follow) flyTo(k.view);
+  }
+
+  function prevChapter() {
+    stop();
+    let i = kfIndexAt(year);
+    if (Math.abs(KF[i].year - year) < 0.5) i--;
+    goTo(KF[Math.max(0, i)].year, true);
+  }
+  function nextChapter() {
+    stop();
+    const i = kfIndexAt(year);
+    goTo(KF[Math.min(KF.length - 1, i + 1)].year, true);
+  }
+
+  function goTo(target, animate) {
+    cancelAnimationFrame(raf.go);
+    if (!animate) { setYear(target); return; }
+    const from = year, t0 = performance.now();
+    const dur = Math.min(1600, 350 + Math.abs(yearToPos(target) - yearToPos(from)) * 6);
+    const step = now => {
+      const t = Math.min(1, (now - t0) / dur), e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      setYear(posToYear(yearToPos(from) + (yearToPos(target) - yearToPos(from)) * e));
+      if (t < 1) raf.go = requestAnimationFrame(step); else setYear(target);
+    };
+    step(t0);
+  }
+
+  function start() {
+    playing = true;
+    cancelAnimationFrame(raf.go);
+    $('cm-play').classList.add('is-playing');
+    $('cm-play-label').textContent = 'Pause timeline';
+    if (year >= D.yearRange[1] - 0.5) setYear(D.yearRange[0]);
+    let last = performance.now(), hold = 0;
+    const step = now => {
+      if (!playing) return;
+      const dt = Math.min(100, now - last);
+      last = now;
+      const ki = kfIndexAt(year);
+      if (hold > 0) {
+        hold -= dt;
+      } else {
+        const p = yearToPos(year) + dt * 0.023 * speed; // ≈ 1 s travel + pause per chapter at 1×
+        const nextK = KF[ki + 1];
+        if (nextK && posToYear(p) >= nextK.year) { setYear(nextK.year); hold = 2600 / speed; }
+        else if (p >= 1000) { setYear(D.yearRange[1]); stop(); return; }
+        else setYear(posToYear(p));
+      }
+      raf.play = requestAnimationFrame(step);
+    };
+    raf.play = requestAnimationFrame(step);
+  }
+  function stop() {
+    playing = false;
+    cancelAnimationFrame(raf.play);
+    const btn = $('cm-play');
+    if (!btn) return;
+    btn.classList.remove('is-playing');
+    $('cm-play-label').textContent = 'Play timeline';
+  }
+
+  /* ── View box / camera ── */
+  function applyVB() {
+    svg.setAttribute('viewBox', vb.map(v => v.toFixed(2)).join(' '));
+    const r = vb[2] / 260, fs = vb[2] / 70, zoomedIn = vb[2] < 2600;
+    placesEls.forEach(o => {
+      const c = o.el.childNodes;
+      c[0].setAttribute('cx', o.p.x); c[0].setAttribute('cy', o.p.y); c[0].setAttribute('r', r * 1.9);
+      c[1].setAttribute('cx', o.p.x); c[1].setAttribute('cy', o.p.y); c[1].setAttribute('r', r);
+      c[2].setAttribute('x', o.p.x + r * 1.6); c[2].setAttribute('y', o.p.y + fs * 0.35); c[2].setAttribute('font-size', fs);
+      c[2].style.display = zoomedIn ? '' : 'none';
+      c[2].style.strokeWidth = (fs * 0.22) + 'px';
+    });
+  }
+  // The part of the map not covered by the overlays: the chapter panel on
+  // the right and the legend at the bottom (wide screens only; on narrow
+  // ones both sit below the map in normal flow).
+  function visibleArea() {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const overlay = el => el && el.offsetParent && getComputedStyle(el).position === 'absolute' ? el.getBoundingClientRect() : null;
+    const side = overlay($('cm-side')), lg = overlay($('cm-legend'));
+    const visW = side ? Math.max(rect.width * 0.4, side.left - 12 - rect.left) : rect.width;
+    const visH = lg ? rect.height - Math.max(0, Math.min(rect.height * 0.5, rect.bottom - lg.top)) : rect.height;
+    return { rect, visW, visH };
+  }
+  // Fits view v into the visible area, then extends the viewBox right and
+  // down so the covered strips stay filled with map.
+  function fitAspect(v) {
+    const a = visibleArea();
+    if (!a) return v.slice();
+    const ar = a.visW / a.visH, w = v[2], h = v[3];
+    let out;
+    if (w / h > ar) { const nh = w / ar; out = [v[0], v[1] - (nh - h) / 2, w, nh]; }
+    else { const nw = h * ar; out = [v[0] - (nw - w) / 2, v[1], nw, h]; }
+    out[2] *= a.rect.width / a.visW;
+    out[3] *= a.rect.height / a.visH;
+    return out;
+  }
+  function refit() {
+    const a = visibleArea();
+    if (a) vb = fitAspect([vb[0], vb[1], vb[2] * a.visW / a.rect.width, vb[3] * a.visH / a.rect.height]);
+    applyVB();
+  }
+  function animateVB(target) {
+    target = fitAspect(target);
+    cancelAnimationFrame(raf.fly);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { vb = target; applyVB(); return; }
+    const from = vb.slice(), t0 = performance.now(), dur = 1300;
+    const step = now => {
+      const t = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - t, 3);
+      // zoom in log space for a smoother "fly"
+      const w = Math.exp(Math.log(from[2]) + (Math.log(target[2]) - Math.log(from[2])) * e);
+      const cx = (from[0] + from[2] / 2) + ((target[0] + target[2] / 2) - (from[0] + from[2] / 2)) * e;
+      const cy = (from[1] + from[3] / 2) + ((target[1] + target[3] / 2) - (from[1] + from[3] / 2)) * e;
+      const h = w * target[3] / target[2];
+      vb = [cx - w / 2, cy - h / 2, w, h];
+      applyVB();
+      if (t < 1) raf.fly = requestAnimationFrame(step);
+    };
+    raf.fly = requestAnimationFrame(step);
+  }
+  function flyTo(view) {
+    if (view === curView && follow) return;
+    curView = view;
+    if (D.views[view]) animateVB(D.views[view]);
+  }
+  function setFollow(f) {
+    follow = f;
+    curView = null;
+    $('cm-follow').setAttribute('aria-pressed', String(f));
+  }
+  function zoom(f, cx, cy) {
+    setFollow(false);
+    cancelAnimationFrame(raf.fly);
+    if (cx == null) { cx = vb[0] + vb[2] / 2; cy = vb[1] + vb[3] / 2; }
+    const w = Math.max(150, Math.min(D.width * 1.2, vb[2] * f)), h = w * vb[3] / vb[2];
+    vb = [cx - (cx - vb[0]) * w / vb[2], cy - (cy - vb[1]) * h / vb[3], w, h];
+    applyVB();
+  }
+  function svgPoint(ev) {
+    const r = svg.getBoundingClientRect(), s = Math.max(vb[2] / r.width, vb[3] / r.height);
+    const ox = (r.width - vb[2] / s) / 2, oy = (r.height - vb[3] / s) / 2;
+    return [vb[0] + (ev.clientX - r.left - ox) * s, vb[1] + (ev.clientY - r.top - oy) * s];
+  }
+  function showHint() {
+    const hint = $('cm-hint');
+    hint.classList.add('is-visible');
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => hint.classList.remove('is-visible'), 1400);
+  }
+  function enablePanZoom() {
+    let drag = null, pinch = null;
+    const pts = new Map();
+    // The map sits inside a scrolling page, so a plain wheel scrolls the
+    // page; Ctrl/⌘ + wheel (and trackpad pinch, which browsers report as
+    // ctrl+wheel) zooms the map.
+    svg.addEventListener('wheel', e => {
+      if (!e.ctrlKey && !e.metaKey) { showHint(); return; }
+      e.preventDefault();
+      const p = svgPoint(e);
+      zoom(e.deltaY > 0 ? 1.15 : 1 / 1.15, p[0], p[1]);
+    }, { passive: false });
+    svg.addEventListener('pointerdown', e => {
+      pts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (pts.size === 1) drag = { x: e.clientX, y: e.clientY, vb: vb.slice(), moved: false };
+      if (pts.size === 2) {
+        const a = [...pts.values()];
+        pinch = { d: Math.hypot(a[0][0] - a[1][0], a[0][1] - a[1][1]) };
+        drag = null;
+      }
+    });
+    svg.addEventListener('pointermove', e => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (pinch && pts.size === 2) {
+        const a = [...pts.values()], d = Math.hypot(a[0][0] - a[1][0], a[0][1] - a[1][1]);
+        const p = svgPoint({ clientX: (a[0][0] + a[1][0]) / 2, clientY: (a[0][1] + a[1][1]) / 2 });
+        zoom(pinch.d / d, p[0], p[1]);
+        pinch.d = d;
+        return;
+      }
+      if (!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      if (!drag.moved) {
+        drag.moved = true;
+        setFollow(false);
+        cancelAnimationFrame(raf.fly);
+        svg.classList.add('is-dragging');
+        svg.setPointerCapture(e.pointerId);
+        drag.vb = vb.slice(); drag.x = e.clientX; drag.y = e.clientY;
+        return;
+      }
+      const r = svg.getBoundingClientRect(), s = Math.max(drag.vb[2] / r.width, drag.vb[3] / r.height);
+      vb = [drag.vb[0] - dx * s, drag.vb[1] - dy * s, drag.vb[2], drag.vb[3]];
+      applyVB();
+      hideTip();
+    });
+    const end = e => {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) pinch = null;
+      if (pts.size === 0) { drag = null; svg.classList.remove('is-dragging'); }
+    };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+    window.addEventListener('resize', () => { if (isOpen) { refit(); thinTickLabels(); } });
+  }
+
+  /* ── Tooltips ── */
+  function placeTip(ev) {
+    const r = stage.getBoundingClientRect();
+    let x = ev.clientX - r.left + 14, y = ev.clientY - r.top + 14;
+    tip.classList.add('is-visible');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    if (x + tw > r.width - 6) x = ev.clientX - r.left - tw - 14;
+    if (y + th > r.height - 6) y = ev.clientY - r.top - th - 14;
+    tip.style.left = Math.max(6, x) + 'px';
+    tip.style.top = Math.max(6, y) + 'px';
+  }
+  function showRegionTip(ev, r) {
+    const y = Math.round(year), c = catFor(r, y, new Set(KF[kfIndexAt(y)].lineage));
+    tip.innerHTML = `<b>${esc(labelFor(r, y))}</b>`
+      + `<div class="cm-tip-status"><span class="cm-tip-swatch cm-sw cm-sw--${c}"></span>${esc(CATS[c])}</div>`
+      + `<div class="cm-tip-note">Border snapshot ${esc(fmtYear(r.from))}${r.to !== r.from ? ' – ' + esc(fmtYear(r.to)) : ''}</div>`;
+    placeTip(ev);
+  }
+  function showPlaceTip(ev, p) {
+    tip.innerHTML = `<b>${esc(p.name)}</b><div class="cm-tip-status"><span class="cm-tip-swatch cm-sw cm-sw--ot"></span>British Overseas Territory</div><div class="cm-tip-note">Click to open its Wikipedia article.</div>`;
+    placeTip(ev);
+  }
+  function hideTip() { if (tip) tip.classList.remove('is-visible'); }
+
+  // Mapped British area for the shown year; details in the (i) tooltip.
+  function updateArea(y, area) {
+    const el = $('cm-pop');
+    if (!area) { el.hidden = true; return; }
+    const txt = fmtArea(area);
+    $('cm-pop-n').textContent = `≈ ${txt}`;
+    $('cm-pop-info').setAttribute('aria-label', `About this estimate: about ${txt} of mapped British territory`);
+    areaTip = `<b>Mapped British territory in ${esc(fmtYear(y))}</b>`
+      + `<div class="cm-tip-status">≈ ${esc(txt)}</div>`
+      + '<div class="cm-tip-note">Home realm, colonial claims and Dominions as drawn on the map. Indicative only — not an authoritative empire total.</div>';
+    el.hidden = false;
+  }
+  function showAreaTip() {
+    const btn = $('cm-pop-info'), r = btn.getBoundingClientRect();
+    tip.innerHTML = areaTip;
+    placeTip({ clientX: r.left - 14, clientY: r.bottom - 6 });
+  }
+
+  // #year=NNNN (current) or ?year=NNNN (links to the earlier map).
+  function yearFromUrl() {
+    const m = window.location.hash.match(/year=(-?\d+)/) || window.location.search.match(/[?&]year=(-?\d+)/);
+    return m ? parseFloat(m[1]) : NaN;
+  }
+
+  // Shows the first chapter (or the linked year) at that chapter's region.
+  function showInitial() {
+    const qy = yearFromUrl();
+    const startY = isFinite(qy) ? Math.max(D.yearRange[0], Math.min(D.yearRange[1], qy)) : KF[0].year;
+    lastKF = -1;
+    shownYear = null;
+    curView = KF[kfIndexAt(startY)].view;
+    vb = fitAspect(D.views[curView]);
+    setYear(startY);
+    applyVB();
+  }
+
+  /* ── Public API (called by main.js) ── */
+  function open() {
+    isOpen = true;
+    if (built) {
+      // Returning to the page — refit the camera, since the stage had no
+      // size while the page was hidden.
+      const qy = yearFromUrl();
+      if (isFinite(qy) && Math.round(qy) !== Math.round(year)) showInitial();
+      else { refit(); thinTickLabels(); scheduleHash(); }
+      return;
+    }
+    loadData().then(data => {
+      if (built) return;
+      D = data;
+      build();
+      // Wait for the page to be laid out so fitAspect can measure the stage.
+      requestAnimationFrame(() => requestAnimationFrame(showInitial));
+    }).catch(() => {
+      const el = $('cm-loading');
+      if (el) el.textContent = 'The map could not be loaded. Please reload the page.';
+    });
+  }
+
+  function close() {
+    isOpen = false;
+    clearTimeout(hashTimer);
+    stop();
+    hideTip();
+  }
+
+  // Keyboard shortcuts while the page is open; returns true if handled.
+  function handleKey(e) {
+    if (!built || !isOpen) return false;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' && e.target !== slider) return false;
+    if (tag === 'TEXTAREA') return false;
+    if (e.key === 'ArrowRight') { e.preventDefault(); nextChapter(); return true; }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prevChapter(); return true; }
+    if (e.key === ' ' && tag !== 'BUTTON') { e.preventDefault(); playing ? stop() : start(); return true; }
+    return false;
+  }
+
+  // Static thumbnail for the event modal's "Great Britain in YEAR" card
+  // (main.js): that year's borders, with the British home realm, empire and
+  // Dominions in gold over the modern UK outline, framed on the year's
+  // chapter view with room to its right (the card fades the right edge out).
+  // Resolves false when the year is outside the map's range.
+  function renderThumb(el, y) {
+    return loadData().then(data => {
+      const kf = data.keyframes, first = kf[0].year, last = kf[kf.length - 1].year;
+      if (!(y >= first)) return false;
+      y = Math.min(Math.round(y), last);
+      let k = kf[0];
+      kf.forEach(x => { if (y >= x.year) k = x; });
+      // Framed for the card's widest shape (3.2:1); the card's SVG anchors
+      // it left (xMinYMid slice), so narrower shapes just lose the right edge.
+      const world = k.view === 'world', v = data.views[k.view] || data.views.world, ar = 3.2;
+      let h = v[3] * (world ? 1 : 1.15), w = h * ar;
+      if (w < v[2] * 1.05) { w = v[2] * 1.05; h = w / ar; }
+      const x = v[0] - (w - v[2]) * (world ? 0.06 : 0.22), top = v[1] + v[3] / 2 - h / 2;
+      el.setAttribute('viewBox', [x, top, w, h].map(n => n.toFixed(0)).join(' '));
+      const gb = new Set(data.british), emp = new Set(data.empire), dom = {};
+      data.dominions.forEach(d => { dom[d.name] = d; });
+      const cls = r => gb.has(r.name) ? 'gb' : emp.has(r.name) ? 'emp'
+        : (dom[r.name] && dom[r.name].from <= y && y <= dom[r.name].to ? 'dom' : '');
+      el.innerHTML = `<path class="land" d="${data.land}"></path>`
+        + data.regions.filter(r => r.from <= y && y <= r.to).map(r => `<path class="reg ${cls(r)}" d="${r.d}"></path>`).join('')
+        + `<path class="ref" d="${data.reference}"></path>`;
+      return true;
+    });
+  }
+
+  return { open, close, handleKey, renderThumb };
+})();

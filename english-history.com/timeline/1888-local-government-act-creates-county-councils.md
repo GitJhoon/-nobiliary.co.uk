@@ -1,0 +1,18 @@
+# Local Government Act creates county councils (1888)
+
+URL: https://english-history.com/timeline/1888-local-government-act-creates-county-councils
+Categories: main-event
+
+Elected county councils were established across England and Wales. Within the broader Victorian Britain period, industrial society, mass politics, public-health reform, global empire and the Irish question dominated public life. This event is placed at 1888 in the chronology so it can be read alongside the political, military, social and cultural changes around it. The reform modernized local administration and expanded representative local government.
+
+## Why it matters
+The reform modernized local administration and expanded representative local government.
+
+Ruler at the time: [Victoria](https://english-history.com/rulers/victoria)
+
+## Sources
+- [Wikipedia topic lookup — Local Government Act creates county councils](https://en.wikipedia.org/wiki/Special:Search?search=Local+Government+Act+creates+county+councils&go=Go)
+- [Encyclopaedia Britannica topic lookup — Local Government Act creates county councils](https://www.britannica.com/search?query=Local+Government+Act+creates+county+councils)
+- [Wikipedia — Timeline of British history](https://en.wikipedia.org/wiki/Timeline_of_British_history_%281800%E2%80%931899%29)
+- [The National Archives — Victorian resources](https://www.nationalarchives.gov.uk/education/)
+

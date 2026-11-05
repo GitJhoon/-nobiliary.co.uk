@@ -1,0 +1,70 @@
+/* Prime Ministers subpage (#pm-page). Cards reuse the monarch .rp-avatar styles in style.css. */
+.pm-root { margin-top:6px; }
+.pm-controls[hidden] { display:none; }
+.pm-controls { flex-wrap:wrap; }
+.pm-sort-wrap { margin-left:auto; }
+.pm-sort {
+  font:400 14px var(--f-ui); color:var(--white);
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); border-radius:3px;
+  padding:9px 12px; min-width:170px;
+}
+.pm-sort:focus-visible { outline:2px solid var(--gold); outline-offset:2px; }
+.pm-sort option { background:#120e1c; color:#fff; }
+.pm-legend { margin-bottom:22px; }
+.pm-legend-item:disabled { cursor:default; opacity:1; }
+
+/* Timeline */
+.pm-timeline { border:1px solid rgba(201,168,68,0.22); background:rgba(255,255,255,0.03); border-radius:3px; margin-bottom:40px; }
+.pm-timeline-scroll { overflow-x:auto; padding:6px 0 4px; }
+.pm-timeline-inner { min-width:754px; }
+.pm-row { display:flex; align-items:stretch; }
+.pm-row-label { flex:0 0 172px; display:flex; align-items:center; gap:12px; padding:0 14px; font:400 13px/1.25 var(--f-ui); color:var(--white-mid); border-right:1px solid rgba(255,255,255,0.09); }
+.pm-row-label svg { color:var(--gold); flex-shrink:0; width:22px; height:22px; }
+.pm-row-track { position:relative; flex:1; margin-right:22px; }
+.pm-row-monarchs { border-bottom:1px solid rgba(255,255,255,0.08); }
+.pm-row-monarchs .pm-row-track { height:72px; }
+.pm-monarch-line .rp-axis-bar { top:34px; }
+.pm-monarch-name { text-decoration:none; }
+.pm-monarch-name:hover { text-decoration:underline; text-underline-offset:4px; }
+.pm-row-pms .pm-row-track { height:44px; }
+.pm-bar { position:absolute; top:16px; height:12px; min-width:2px; border-radius:2px; box-shadow:0 0 0 1px #0a0810; transition:transform .15s, filter .15s, opacity .2s; }
+.pm-bar:hover, .pm-bar.is-hot { filter:brightness(1.35); transform:scaleY(1.6); z-index:3; }
+.pm-bar.is-dim { opacity:.22; }
+.pm-axis { border-top:1px solid rgba(255,255,255,0.09); }
+.pm-axis .pm-row-track { height:32px; }
+.pm-tick { position:absolute; top:8px; transform:translateX(-50%); font:400 12px var(--f-ui); color:var(--white-dim); }
+.pm-tick::before { content:""; position:absolute; left:50%; bottom:100%; height:6px; border-left:1px solid rgba(255,255,255,0.2); margin-bottom:2px; }
+.pm-tick.is-major { color:var(--white-mid); }
+
+/* Card grid (monarch-style avatars) */
+.pm-list-head { display:flex; justify-content:space-between; align-items:baseline; gap:20px; flex-wrap:wrap; margin-bottom:18px; }
+.pm-list-head h2 { font-family:var(--f-heading); font-weight:600; font-size:clamp(22px,2.4vw,30px); }
+.pm-list-head p { font:600 12px var(--f-ui); text-transform:uppercase; letter-spacing:1.5px; color:var(--gold); }
+#pm-avatars .rp-avatar[hidden] { display:none; }
+#pm-avatars .rp-avatar { cursor:pointer; }
+#pm-avatars .rp-avatar:focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
+#pm-avatars .rp-avatar-duration { display:none; }
+#pm-avatars.show-duration .rp-avatar-duration { display:block; }
+#pm-avatars .rp-avatar-dynasty { flex-wrap:wrap; }
+#pm-avatars .rp-avatar-portrait { display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.05); }
+#pm-avatars .rp-portrait-placeholder { width:46%; color:rgba(255,255,255,0.3); }
+.pm-party-sep { color:var(--white-dim); }
+.pm-avatar.is-flash { border-color:var(--gold) !important; box-shadow:0 0 0 3px rgba(201,168,68,0.4), 0 0 28px rgba(201,168,68,0.35); }
+
+/* Tooltip facts (the tooltip itself reuses .rp-tooltip from the Monarchs page) */
+.pm-tip-facts { line-height:1.5; }
+.pm-tip-facts b { display:block; color:var(--gold); font:600 10.5px var(--f-ui); text-transform:uppercase; letter-spacing:1px; margin-top:4px; }
+.pm-note { font:400 13px/1.5 var(--f-ui); color:var(--white-dim); margin-top:14px; }
+.pm-note code { color:var(--gold-dim); }
+
+@media (max-width:760px) {
+  .pm-sort-wrap { margin-left:0; flex:1 1 100%; }
+  .pm-sort { width:100%; }
+}
+@media (prefers-reduced-motion:reduce) { .pm-bar, .pm-avatar-tip, .pm-monarch { transition:none; } }
+
+#pm-avatars { gap:10.24px; }
+#pm-avatars .rp-avatar[hidden], #pm-avatars .rp-avatar-more[hidden] { display:none; }
+.pm-avatar-row .rp-page-arrow { align-self:center; }
+.pm-tick:first-child { transform:none; }
+.pm-tick:last-child { transform:translateX(-100%); }
