@@ -4,17 +4,26 @@
    ========================================================== */
 
 :root {
-  --paper: #f3ede2;
-  --paper-2: #ebe3d4;
-  --card: #fbf8f2;
-  --ink: #1d1b18;
-  --ink-2: #4a453d;
-  --ink-3: #7a7266;
-  --rule: #d6ccb9;
-  --rule-strong: #1d1b18;
-  --accent: #9b2c1f;
-  --accent-ink: #7a2117;
-  --accent-soft: #f0d9cf;
+  /* Fundo vermelho heráldico; o texto solto na página fica claro */
+  --red: #7a1a1e;        /* gules: vermelho heráldico profundo */
+  --red-deep: #681519;
+  --red-dark: #4e0f12;
+  --red-ink: #2a0809;
+  --red-bright: #a3242a;  /* vermelho de destaque dentro dos cards */
+  --gold: #e3c27a;
+  --gold-line: rgba(227, 194, 122, .55);
+
+  --paper: var(--red);
+  --paper-2: var(--red-deep);
+  --card: #f8f2e6;
+  --ink: #fbf3e8;
+  --ink-2: #f4ddd4;
+  --ink-3: #dcb3a8;
+  --rule: rgba(251, 243, 232, .2);
+  --rule-strong: var(--gold-line);
+  --accent: var(--gold);
+  --accent-ink: #e9c46a;
+  --accent-soft: rgba(251, 243, 232, .14);
   --navy: #1f3550;
 
   --era-prehistoric: #8a7a52;
@@ -48,7 +57,7 @@ body {
 }
 img { max-width: 100%; display: block; }
 a { color: inherit; }
-::selection { background: var(--accent); color: #fff; }
+::selection { background: var(--gold); color: #1d1b18; }
 
 .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 var(--gutter); }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -59,7 +68,7 @@ a { color: inherit; }
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding-top: 14px; padding-bottom: 14px;
 }
-.brand { display: flex; align-items: baseline; gap: 12px; text-decoration: none; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
 .brand-mark {
   font-family: var(--serif); font-weight: 700; font-size: 26px; letter-spacing: -0.02em; line-height: 1;
 }
@@ -212,7 +221,7 @@ a { color: inherit; }
 
 /* ---------- Timeline page ---------- */
 .toolbar {
-  position: sticky; top: 61px; z-index: 30; background: rgba(243,237,226,.94); backdrop-filter: blur(8px);
+  position: sticky; top: 73px; z-index: 30; background: rgba(122,26,30,.95); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--rule);
 }
 .toolbar-inner { display: flex; gap: 12px; align-items: center; padding-top: 12px; padding-bottom: 12px; flex-wrap: wrap; }
@@ -233,7 +242,7 @@ a { color: inherit; }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .order-btn { border: 1px solid var(--ink); background: transparent; border-radius: 999px; font: 600 13px var(--sans); padding: 8px 14px; cursor: pointer; color: var(--ink); white-space: nowrap; }
 .result-count { font-size: 13px; color: var(--ink-3); white-space: nowrap; }
-@media (max-width: 900px) { .toolbar { top: 57px; } }
+@media (max-width: 900px) { .toolbar { top: 73px; } }
 
 .ledger-layout { display: grid; grid-template-columns: 200px 1fr; gap: clamp(24px, 4vw, 56px); padding-top: 32px; padding-bottom: 80px; }
 .rail { position: sticky; top: 140px; align-self: start; }
@@ -265,7 +274,7 @@ a { color: inherit; }
 .entry.feat h3 { font-family: var(--serif); font-weight: 600; font-size: 20px; }
 .entry.feat .yr { color: var(--c); }
 .entry:target { background: var(--accent-soft); box-shadow: -12px 0 0 var(--accent-soft), 12px 0 0 var(--accent-soft); }
-.entry mark { background: #f3d38a; color: inherit; padding: 0 1px; }
+.entry mark { background: #f3d38a; color: #1d1b18; padding: 0 1px; }
 @media (max-width: 560px) { .entry { grid-template-columns: 84px 1fr; gap: 12px; } .entry .yr { font-size: 19px; } .entry .yr small { display: block; margin: 0; } }
 .empty { padding: 60px 0; text-align: center; color: var(--ink-3); font-family: var(--serif); font-style: italic; font-size: 22px; }
 
@@ -361,16 +370,16 @@ a { color: inherit; }
 @media (max-width: 760px) { .about { grid-template-columns: 1fr; } }
 
 /* ---------- Footer ---------- */
-.footer { background: var(--ink); color: #cfc7b8; padding: 56px 0 40px; }
+.footer { background: var(--red-ink); border-top: 3px double var(--gold-line); color: #ead6cf; padding: 56px 0 40px; }
 .footer-grid { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 40px; }
-.footer .brand-mark { color: var(--paper); font-size: 30px; }
-.footer .brand-mark em { color: #e08c73; }
-.footer h4 { font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: #8f877a; margin: 0 0 12px; }
+.footer .brand-mark { color: #fbf3e8; font-size: 30px; }
+.footer .brand-mark em { color: var(--gold); }
+.footer h4 { font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: #d9a99c; margin: 0 0 12px; }
 .footer ul { list-style: none; margin: 0; padding: 0; }
 .footer li { margin-bottom: 8px; }
 .footer a { color: #e9e2d4; text-decoration: none; font-size: 15px; }
 .footer a:hover { color: #fff; text-decoration: underline; }
-.footer-base { margin-top: 48px; padding-top: 18px; border-top: 1px solid #3a3630; font-size: 13px; color: #8f877a; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.footer-base { margin-top: 48px; padding-top: 18px; border-top: 1px solid rgba(251,243,232,.2); font-size: 13px; color: #d9a99c; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 @media (max-width: 760px) { .footer-grid { grid-template-columns: 1fr 1fr; } .footer-grid > :first-child { grid-column: 1 / -1; } }
 
 /* Era colour hooks */
@@ -387,3 +396,88 @@ a { color: inherit; }
 .reign-label { position: absolute; font-size: 12px; line-height: 18px; color: var(--ink-2); white-space: nowrap; pointer-events: none; }
 .emblem { position: relative; }
 .emblem img { position: absolute; inset: 0; background: var(--paper-2); }
+
+/* ---------- Tema vermelho (gules & or) ----------
+   Fundo vermelho profundo, detalhes em dourado. Cards, busca, chips
+   e o gráfico de reinados ficam em pergaminho, com texto escuro. */
+.house, .theme, .search, .chip, .reign-scroll, .reign-tip {
+  --paper: #f1e8d6;
+  --paper-2: #ebdfc8;
+  --ink: #23191a;
+  --ink-2: #4d3f3c;
+  --ink-3: #7c6b63;
+  --rule: #e0d0b2;
+  --rule-strong: #23191a;
+  --accent: var(--red-bright);
+  --accent-soft: #f2dccf;
+  color: var(--ink);
+}
+.reign-tip { background: var(--red-ink); color: #f8f2e6; border: 1px solid var(--gold-line); }
+
+/* Cabeçalho mais escuro, com filete dourado */
+.masthead { background: var(--red-dark); border-bottom: 1px solid var(--gold-line); }
+.nav a:hover { background: rgba(251, 243, 232, .1); }
+.nav a[aria-current="page"] { background: var(--gold); color: var(--red-ink); }
+.nav-toggle { border-color: var(--gold-line); }
+.brand-sub { color: var(--gold); opacity: .85; }
+
+/* Topo das páginas internas com um padrão de losangos bem sutil */
+.page-head {
+  border-bottom: 3px double var(--gold-line);
+  background:
+    linear-gradient(180deg, rgba(78,15,18,.0), rgba(78,15,18,.35)),
+    repeating-linear-gradient(45deg, rgba(227,194,122,.05) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(-45deg, rgba(227,194,122,.05) 0 1px, transparent 1px 22px);
+}
+.hero {
+  background:
+    repeating-linear-gradient(45deg, rgba(227,194,122,.045) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(-45deg, rgba(227,194,122,.045) 0 1px, transparent 1px 22px);
+}
+.display em, .h2 em { color: var(--gold); }
+
+/* Botões e filtros */
+.btn { background: var(--gold); border-color: var(--gold); color: var(--red-ink); }
+.btn:hover { background: #f0d79c; border-color: #f0d79c; color: var(--red-ink); }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--gold-line); }
+.btn.ghost:hover { background: rgba(251, 243, 232, .1); color: var(--ink); }
+.order-btn { border-color: var(--gold-line); }
+.chip[aria-pressed="true"] { background: var(--gold); border-color: var(--gold); color: var(--red-ink); font-weight: 600; }
+.chips .chip:not([aria-pressed="true"]):hover { border-color: var(--red-bright); }
+
+/* Cards das casas: pergaminho com moldura dourada fina */
+.house { border: 1px solid #d9c497; border-top: 5px solid var(--c); box-shadow: 0 1px 0 rgba(0,0,0,.15), 0 10px 24px -14px rgba(0,0,0,.55); }
+.emblem { background: linear-gradient(180deg, #f1e8d6, #e4d5b6); border: 1px solid #d9c497; }
+.house details p strong { color: var(--ink); }
+.theme { background: var(--card); }
+.themes { background: var(--gold-line); border-color: var(--gold-line); }
+
+/* Fitas e linhas */
+.keylist-head { border-bottom-color: var(--gold); }
+.about aside { border-top-color: var(--gold); }
+.chapter:nth-of-type(even) { background: var(--red-deep); }
+.entry:target { background: rgba(227,194,122,.14); box-shadow: -12px 0 0 rgba(227,194,122,.14), 12px 0 0 rgba(227,194,122,.14); }
+
+/* Cores das eras clareadas quando ficam direto sobre o vermelho */
+.chapter-num, .chapter-tagline, .keylist .y { color: color-mix(in srgb, var(--era) 30%, #fff8ee); }
+.era-block-head .n, .entry.feat .yr { color: color-mix(in srgb, var(--c) 30%, #fff8ee); }
+
+/* ---------- Logo Nobiliary ---------- */
+.brand-crest { width: 44px; height: 44px; border-radius: 6px; border: 1px solid var(--gold-line); object-fit: cover; flex: none; }
+.brand-text { display: flex; flex-direction: column; gap: 4px; }
+.brand-mark { letter-spacing: .01em; }
+.masthead .brand-mark { color: var(--gold); font-size: 24px; }
+.brand-sub { font-size: 10px; letter-spacing: .2em; }
+@media (max-width: 900px) { .brand-sub { display: block; } }
+@media (max-width: 420px) { .brand-sub { display: none; } }
+
+.hero-logo { margin: 0 auto clamp(32px, 5vw, 56px); max-width: 720px; }
+.hero-logo img {
+  width: 100%; height: auto; border-radius: 6px;
+  border: 1px solid var(--gold-line);
+  box-shadow: 0 0 0 6px rgba(78,15,18,.6), 0 0 0 7px var(--gold-line), 0 24px 48px -20px rgba(0,0,0,.7);
+}
+
+.footer-brand { display: flex; align-items: center; gap: 14px; }
+.footer-brand img { width: 56px; height: 56px; border-radius: 8px; border: 1px solid var(--gold-line); }
+.footer .footer-brand .brand-mark { color: var(--gold); }

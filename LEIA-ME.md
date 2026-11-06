@@ -8,7 +8,7 @@ Site estático, sem build. Funciona direto na Vercel com o preset **Other**.
 index.html         Página inicial: as 8 eras em capítulos
 timeline.html      Os 526 eventos, com busca, filtro por era e ordem
 rulers.html        Gráfico de reinados + lista por casa / por duração
-houses.html        As 23 casas reais e nobres
+houses.html        As 24 casas reais e nobres
 legacy.html        Legado
 bibliography.html  Fontes
 about.html         Sobre
